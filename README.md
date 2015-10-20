@@ -1,2 +1,5 @@
-# jni-nvm
-bypass both JVM and underlying kernel and access non-volatile memory directly.
+# jni-nvm #
+
+user-level NVM access for Java: take full advantage of the potential
+performance of new NVM technologies.
+
