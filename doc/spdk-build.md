@@ -18,7 +18,7 @@ to verify
 
 ## Prerequisites ##
 
-upgrade gcc; the version is 4.4.7 for CentOS 6.x.
+install gcc; the version is 4.4.7 for CentOS 6.x.
 
 ```
     $ sudo yum install gcc
@@ -54,25 +54,29 @@ then install CUnit-devel
     $ sudo yum install CUnit-devel
 ```
 
-## Download the source ##
+## Download the sources ##
 
-download SPDK and DPDK source
+download SPDK and DPDK source codes
 
 ```
     $ git clone https://github.com/spdk/spdk.git
-    $ cd spdk
     $ wget http://dpdk.org/browse/dpdk/snapshot/dpdk-2.1.0.tar.gz
     $ tar zxvf dpdk-2.1.0.tar.gz
 ```
 
 since the gcc of CentOS 6.x doesn't support `_Static_assert`, try the following
-`ct_assert`
+ugly fix for `include/spdk/nvme_spec.h`
 
 ```
     #define ASSERT_CONCAT_(a, b) a##b
     #define ASSERT_CONCAT(a, b) ASSERT_CONCAT_(a, b)
-    #define ct_assert(e) enum { ASSERT_CONCAT(assert_line_, __LINE__) = 1/(!!(e)) }
-    #define _Static_assert(e, i) enum { ASSERT_CONCAT(assert_line_, __LINE__) = 1/(!!(e)) }    // an ugly fix
+    #ifdef __COUNTER__
+        #define _Static_assert(e, m) \
+            ;enum { ASSERT_CONCAT(static_assert_, __COUNTER__) = 1/(!!(e)) }
+    #else
+        #define _Static_assert(e, m) \
+            ;enum { ASSERT_CONCAT(assert_line_, __LINE__) = 1/(!!(e)) }
+    #endif
 ```
 
 ## Build NVMe driver ##
@@ -84,7 +88,7 @@ first build DPDK
 ```
 
 to make compilation work, edit `/usr/include/linux/virtio_net.h` and fix that
-`__u16`
+`u16` to `__u16`
 
 ```
     struct virtio_net_ctrl_mq {
@@ -92,13 +96,29 @@ to make compilation work, edit `/usr/include/linux/virtio_net.h` and fix that
     };
 ```
 
-then make NVMe driver
+then build the NVMe driver
 
 ```
     $ make DPDK_DIR=/path/to/dpdk/x86_64-native-linuxapp-gcc
 ```
 
-run the `identity` example
+before running SPDK applications, first umount the device and remove the kernel
+nvme module, say
+
+```
+    $ sudo umount /dev/nvme0n1p1
+    $ sudo rmmod nvme
+```
+
+and set up HugeTLB
+
+```
+    $ sudo mkdir -p /mnt/hugetlb
+    $ sudo mount -t hugetlbfs nodev /mnt/hugetlb
+    $ sudo echo 1024 > /proc/sys/vm/nr_hugepages
+```
+
+then run the applications, e.g. the `identity` example
 
 ```
     $ sudo ./identify
@@ -308,19 +328,4 @@ run the `identity` example
     Current LBA Format:          LBA Format #00
     LBA Format #00: Data Size:   512  Metadata Size:     0
     LBA Format #01: Data Size:  4096  Metadata Size:     0
-```
-
-remember to umount and device and remove nvme kernel module first, say
-
-```
-    $ sudo umount /dev/nvme0n1p1
-    $ sudo rmmod nvme
-```
-
-and set up HugeTLB
-
-```
-    $ sudo mkdir -p /mnt/hugetlb
-    $ sudo mount -t hugetlbfs nodev /mnt/hugetlb
-    $ sudo echo 1024 > /proc/sys/vm/nr_hugepages
 ```
