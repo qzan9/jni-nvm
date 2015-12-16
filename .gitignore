@@ -1,0 +1,62 @@
+# binary directories
+bin/
+lib/
+obj/
+target/
+out/
+
+# object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# precompiled headers
+*.gch
+*.pch
+
+# libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# shared objects
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# test source and binary files
+test/
+
+# debug files
+*.dSYM/
+
+# Vim temporary files
+*.swp
+*~
+
+# Intellij Idea files
+.idea
+*.iml
+
+# Visual Studio files
+.vs
+*.opensdf
+*.sdf
+*.suo
+*.vcxproj.user
+
+# misc.
+infiniband/
+*.log
+*.bak
