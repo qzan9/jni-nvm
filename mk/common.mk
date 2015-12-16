@@ -1,5 +1,4 @@
 # global directory layout
-ROOT         := ../../../..
 BIN          := $(ROOT)/bin
 INC          := $(ROOT)/inc
 LIB          := $(ROOT)/lib
@@ -15,10 +14,14 @@ OBJFILES     := $(patsubst %.c,$(OBJDIR)/%.o,$(notdir $(CFILES))) \
 TARGETFILE   := $(OUTPUTDIR)/$(PROJECT)
 
 # Java path
-JAVA_HOME    := /usr/lib/jvm/java-1.7.0
+#JAVA_HOME    ?= /usr/lib/jvm/java-1.7.0
+JAVA_HOME    ?= /opt/jdk7
 
 # DPDK path
-DPDK_DIR     := /home/azq/build/dpdk-2.1.0/x86_64-native-linuxapp-gcc
+DPDK_DIR     ?= /home/azq/build/dpdk-2.1.0/x86_64-native-linuxapp-gcc
+
+# SPDK path
+SPDK_DIR     ?= /home/azq/build/spdk-af2a731
 
 # compiler setup
 AMD64 = $(shell uname -m | grep 64)
@@ -40,28 +43,37 @@ INCLUDES     := -I$(PROJECTDIR) -I$(INC)
 ifeq ($(jni),1)
     INCLUDES += -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
 endif
+ifeq ($(spdk),1)
+    INCLUDES += -I$(SPDK_DIR)/include -I$(DPDK_DIR)/include
+endif
 
 LIBRARIES    := -L$(LIB) -L$(OUTPUTDIR)
 ifeq ($(rdma),1)
    LIBRARIES += -libverbs
 endif
 ifeq ($(spdk),1)
-#  LIBRARIES += -Wl,--whole-archive $(LIB)/libspdk_app.a -Wl,--no-whole-archive
-   LIBRARIES += -L$(DPDK_DIR)/lib -Wl,-Bstatic -lrte_eal -lrte_mempool -lrte_ring -lspdk_app -Wl,-Bdynamic
-#  LIBRARIES += -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -lspdk_app
+   SPDK_LIBS  = $(SPDK_DIR)/lib/nvme/libspdk_nvme.a \
+                $(SPDK_DIR)/lib/util/libspdk_util.a \
+                $(SPDK_DIR)/lib/memory/libspdk_memory.a
+#DPDK_LIB_DIR = $(DPDK_LIB)/lib
+   LIBRARIES += -L$(SPDK_LIBS) -lpciaccess -lpthread \
+                -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -lrt
+#               -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_LIB_DIR) -lrt
 endif
 
 CC           := gcc
-CFLAGS       := -fPIC -std=c99 $(ARCH) $(DEBUG) $(INCLUDES)
+CFLAGS       := -fPIC -fstack-protector -std=c99 $(ARCH) $(DEBUG) $(INCLUDES)
 CXX          := g++
 CXXFLAGS     := -fPIC $(ARCH) $(DEBUG) $(INCLUDES)
 
 LINK         := g++
-#LDFLAGS     := -fPIC -Wl,-rpath -Wl,\$$ORIGIN
-LDFLAGS      := -fPIC
+LDFLAGS     := -fPIC -Wl,-rpath -Wl,\$$ORIGIN
 ifeq ($(shared),1)
      LDFLAGS += -shared
   TARGETFILE := $(addsuffix .so,$(TARGETFILE))
+endif
+ifeq ($(spdk),1)
+     LDFLAGS += -Wl,-z,relro,-z,now -Wl,-z,noexecstack
 endif
 
 # misc.
