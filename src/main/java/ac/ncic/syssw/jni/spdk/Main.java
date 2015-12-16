@@ -1,7 +1,9 @@
 package ac.ncic.syssw.jni.spdk;
 
-/**
- * Created by azq on 15-12-16.
- */
+import ac.ncic.syssw.jni.spdk.JniSpdk;
+
 public class Main {
+	public static void main(String[] args) {
+		JniSpdk.spdkIdentify();
+	}
 }
