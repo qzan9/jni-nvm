@@ -1,29 +1,8 @@
-#ifdef __GNUC__
-#	define _SVID_SOURCE
-#endif /* __GNUC__ */
-
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <jni.h>
-
-#include "spdk/app.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *);
-//JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *, void *);
-
-JNIEXPORT int JNICALL identify(JNIEnv *, jobject);
-
-#ifdef __cplusplus
-}
-#endif
+#include "jni_spdk.h"
+#include "spdk_app.h"
 
 static const JNINativeMethod methods[] = {
-	{ "identify", "()I", (void *)identify },
+	{ "spdkIdentify", "()I", (void *)spdkIdentify },
 };
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
