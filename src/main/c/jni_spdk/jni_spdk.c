@@ -30,7 +30,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
 //{
 //}
 
-JNIEXPORT jint JNICALL identify(JNIEnv *env, jobject thisObj)
+JNIEXPORT jint JNICALL spdkIdentify(JNIEnv *env, jobject thisObj)
 {
 	return spdk_identity();
 }
