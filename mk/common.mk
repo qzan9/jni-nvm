@@ -52,14 +52,10 @@ ifeq ($(rdma),1)
    LIBRARIES += -libverbs
 endif
 ifeq ($(spdk),1)
-   SPDK_LIBS  = $(SPDK_DIR)/lib/nvme/libspdk_nvme.a \
-                $(SPDK_DIR)/lib/util/libspdk_util.a \
-                $(SPDK_DIR)/lib/memory/libspdk_memory.a
    LIBRARIES += -L$(SPDK_DIR)/lib/nvme -L$(SPDK_DIR)/lib/memory -L$(SPDK_DIR)/lib/util \
-		-lspdk_nvme -lspdk_memory -lspdk_util \
-		-lpciaccess -lpthread \
-                -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -lrt
-#               -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_LIB_DIR) -lrt
+                -lpciaccess -lpthread \
+                -lspdk_nvme -lspdk_memory -lspdk_util \
+                -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt
 endif
 
 CC           := gcc
