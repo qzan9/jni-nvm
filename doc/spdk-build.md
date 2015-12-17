@@ -1,6 +1,6 @@
 # Build under CentOS 6.x #
 
-## Grant Privilege ##
+## Grant privilege ##
 
 invoke `visudo` as root and add the following
 
@@ -95,6 +95,10 @@ to make compilation work, edit `/usr/include/linux/virtio_net.h` and fix that
         __u16 virtqueue_pairs;
     };
 ```
+
+**NOTE** that to link DPDK static libraries to a shared library (for JVM),
+libraries under `$(DPDK)/lib/*` should be compiled with `-fPIC` (to emit
+position-independent codes, suitable for dynamic linking).
 
 then build the NVMe driver
 
@@ -254,7 +258,7 @@ then run the applications, e.g. the `identity` example
     Multi-Interface Cap:        00
     Max Data Transfer Size:     131072
     Error Recovery Timeout:     Unlimited
-    
+
     Admin Command Set Attributes
     ============================
     Security Send/Receive:       Not Supported
@@ -266,7 +270,7 @@ then run the applications, e.g. the `identity` example
     Firmware Slot 1 Read-Only:   Yes
     Per-Namespace SMART Log:     Yes
     Error Log Page Entries:      63
-    
+
     NVM Command Set Attributes
     ==========================
     Submission Queue Entry Size
@@ -280,20 +284,20 @@ then run the applications, e.g. the `identity` example
     Write Uncorrectable Command: Not Supported
     Dataset Management Command:  Supported
     Volatile Write Cache:        Not Present
-    
+
     Arbitration
     ===========
     Arbitration Burst:           1
     Low Priority Weight:         1
     Medium Priority Weight:      1
     High Priority Weight:        1
-    
+
     Power Management
     ================
     Number of Power States:      1
     Current Power State:         Power State #0
     Power State #0:  Max Power:  25.00 W
-    
+
     Health Information
     ==================
     Critical Warnings:
@@ -316,7 +320,7 @@ then run the applications, e.g. the `identity` example
     Unsafe Shutdowns:            0
     Unrecoverable Media Errors:  0
     Lifetime Error Log Entries:  0
-    
+
     Namespace ID:1
     Deallocate:                  Supported
     Flush:                       Not Supported
@@ -329,3 +333,4 @@ then run the applications, e.g. the `identity` example
     LBA Format #00: Data Size:   512  Metadata Size:     0
     LBA Format #01: Data Size:  4096  Metadata Size:     0
 ```
+
