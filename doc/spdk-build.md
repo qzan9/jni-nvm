@@ -4,70 +4,51 @@
 
 invoke `visudo` as root and add the following
 
-```
     user    ALL=(ALL)    NOPASSWD: ALL
-```
 
 to verify
 
-```
     $ su - user
     $ cat /etc/shadow
     $ sudo cat /etc/shadow
-```
 
 ## Prerequisites ##
 
 install gcc; the version is 4.4.7 for CentOS 6.x.
 
-```
     $ sudo yum install gcc
-```
 
-install libpciaccess-devel
+install `libpciaccess-devel`
 
-```
     $ sudo yum install libpciaccess-devel
-```
 
 install epel-repo
 
-```
     $ wget http://dl.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-?.noarch.rpm
-```
 
 or
 
-```
     $ wget https://dl.fedoraproject.org/pub/epel/epel-release-latest-6.noarch.rpm
-```
 
 then
 
-```
     $ sudo rpm -Uvh epel-release-6-?.noarch.rpm
-```
 
 then install CUnit-devel
 
-```
     $ sudo yum install CUnit-devel
-```
 
 ## Download the sources ##
 
 download SPDK and DPDK source codes
 
-```
     $ git clone https://github.com/spdk/spdk.git
     $ wget http://dpdk.org/browse/dpdk/snapshot/dpdk-2.1.0.tar.gz
     $ tar zxvf dpdk-2.1.0.tar.gz
-```
 
 since the gcc of CentOS 6.x doesn't support `_Static_assert`, try the following
 ugly fix for `include/spdk/nvme_spec.h`
 
-```
     #define ASSERT_CONCAT_(a, b) a##b
     #define ASSERT_CONCAT(a, b) ASSERT_CONCAT_(a, b)
     #ifdef __COUNTER__
@@ -77,54 +58,42 @@ ugly fix for `include/spdk/nvme_spec.h`
         #define _Static_assert(e, m) \
             ;enum { ASSERT_CONCAT(assert_line_, __LINE__) = 1/(!!(e)) }
     #endif
-```
 
 ## Build NVMe driver ##
 
 first build DPDK
 
-```
     $ make install T=x86_64-native-linuxapp-gcc
-```
 
 to make compilation work, edit `/usr/include/linux/virtio_net.h` and fix that
 `u16` to `__u16`
 
-```
     struct virtio_net_ctrl_mq {
         __u16 virtqueue_pairs;
     };
-```
 
 **NOTE** that to link DPDK static libraries to a shared library (for JVM),
-libraries under `$(DPDK)/lib/*` should be compiled with `-fPIC` (to emit
+libraries under `$(DPDK_DIR)/lib/*` should be compiled with `-fPIC` (to emit
 position-independent codes, suitable for dynamic linking).
 
 then build the NVMe driver
 
-```
     $ make DPDK_DIR=/path/to/dpdk/x86_64-native-linuxapp-gcc
-```
 
 before running SPDK applications, first umount the device and remove the kernel
 nvme module, say
 
-```
     $ sudo umount /dev/nvme0n1p1
     $ sudo rmmod nvme
-```
 
 and set up HugeTLB
 
-```
     $ sudo mkdir -p /mnt/hugetlb
     $ sudo mount -t hugetlbfs nodev /mnt/hugetlb
     $ sudo echo 1024 > /proc/sys/vm/nr_hugepages
-```
 
 then run the applications, e.g. the `identity` example
 
-```
     $ sudo ./identify
     EAL: Detected lcore 0 as core 0 on socket 0
     EAL: Detected lcore 1 as core 1 on socket 0
@@ -332,5 +301,4 @@ then run the applications, e.g. the `identity` example
     Current LBA Format:          LBA Format #00
     LBA Format #00: Data Size:   512  Metadata Size:     0
     LBA Format #01: Data Size:  4096  Metadata Size:     0
-```
 
