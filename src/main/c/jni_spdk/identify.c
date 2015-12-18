@@ -41,29 +41,23 @@
 #include <rte_mempool.h>
 #include <rte_lcore.h>
 
-#include "spdk/nvme.h"
-#include "spdk/pci.h"
+#include <spdk/nvme.h>
+#include <spdk/pci.h>
 
 #include "spdk_app.h"
+
+struct rte_mempool *request_mempool;
 
 struct feature {
 	uint32_t result;
 	bool valid;
 };
 
-struct rte_mempool *request_mempool;
+static struct feature features[256];
 
 static int outstanding_commands;
 
-static struct feature features[256];
-
 static struct nvme_health_information_page *health_page;
-
-static const char *ealargs[] = {
-	"identify",
-	"-c 0x1",
-	"-n 4",
-};
 
 static void
 get_feature_completion(void *cb_arg, const struct nvme_completion *cpl)
@@ -71,7 +65,7 @@ get_feature_completion(void *cb_arg, const struct nvme_completion *cpl)
 	struct feature *feature = cb_arg;
 	int fid = feature - features;
 	if (nvme_completion_is_error(cpl)) {
-		printf("get_feature(0x%02X) failed\n", fid);
+		printf("get_feature(0x%02X) failed!\n", fid);
 	} else {
 		feature->result = cpl->cdw0;
 		feature->valid = true;
@@ -79,15 +73,9 @@ get_feature_completion(void *cb_arg, const struct nvme_completion *cpl)
 	outstanding_commands--;
 }
 
-static void
-get_log_page_completion(void *cb_arg, const struct nvme_completion *cpl)
-{
-	if (nvme_completion_is_error(cpl)) {
-		printf("get log page failed\n");
-	}
-	outstanding_commands--;
-}
-
+/*
+ * issue Admin get feature command.
+ */
 static int
 get_feature(struct nvme_controller *ctrlr, uint8_t fid)
 {
@@ -117,7 +105,7 @@ get_features(struct nvme_controller *ctrlr)
 		if (get_feature(ctrlr, features_to_get[i]) == 0) {
 			outstanding_commands++;
 		} else {
-			printf("get_feature(0x%02X) failed to submit command\n", features_to_get[i]);
+			printf("get_feature(0x%02X) failed to submit command!\n", features_to_get[i]);
 		}
 	}
 
@@ -126,16 +114,25 @@ get_features(struct nvme_controller *ctrlr)
 	}
 }
 
+static void
+get_log_page_completion(void *cb_arg, const struct nvme_completion *cpl)
+{
+	if (nvme_completion_is_error(cpl)) {
+		printf("get log page failed!\n");
+	}
+	outstanding_commands--;
+}
+
 static int
 get_health_log_page(struct nvme_controller *ctrlr)
 {
 	struct nvme_command cmd = {};
 
-	if (health_page == NULL) {
+	if (NULL == health_page) {
 		health_page = rte_zmalloc("nvme health", sizeof(*health_page), 4096);
 	}
-	if (health_page == NULL) {
-		printf("Allocation error (health page)\n");
+	if (NULL == health_page) {
+		printf("allocation error (health page)!\n");
 		exit(1);
 	}
 
@@ -153,10 +150,10 @@ get_log_pages(struct nvme_controller *ctrlr)
 {
 	outstanding_commands = 0;
 
-	if (get_health_log_page(ctrlr) == 0) {
+	if (0 == get_health_log_page(ctrlr)) {
 		outstanding_commands++;
 	} else {
-		printf("Get Log Page (SMART/health) failed\n");
+		printf("get log page (SMART/health) failed!\n");
 	}
 
 	while (outstanding_commands) {
@@ -199,11 +196,11 @@ print_uint128_dec(uint64_t *v)
 static void
 print_namespace(struct nvme_namespace *ns)
 {
-	const struct nvme_namespace_data	*nsdata;
-	uint32_t				i;
-	uint32_t				flags;
+	const struct nvme_namespace_data *nsdata;
+	uint32_t i;
+	uint32_t flags;
 
-	nsdata = nvme_ns_get_data(ns);
+	nsdata = nvme_ns_get_data (ns);
 	flags  = nvme_ns_get_flags(ns);
 
 	printf("Namespace ID:%d\n", nvme_ns_get_id(ns));
@@ -234,11 +231,11 @@ print_namespace(struct nvme_namespace *ns)
 static void
 print_controller(struct nvme_controller *ctrlr, struct pci_device *pci_dev)
 {
-	const struct nvme_controller_data	*cdata;
-	uint8_t					str[128];
-	uint32_t				i;
+	const struct nvme_controller_data *cdata;
+	uint8_t  str[128];
+	uint32_t i;
 
-	get_features(ctrlr);
+	get_features (ctrlr);
 	get_log_pages(ctrlr);
 
 	cdata = nvme_ctrlr_get_data(ctrlr);
@@ -432,16 +429,18 @@ print_controller(struct nvme_controller *ctrlr, struct pci_device *pci_dev)
 
 int spdk_identity(void)
 {
-	struct pci_device_iterator	*pci_dev_iter;
-	struct pci_device		*pci_dev;
-	struct pci_id_match		match;
-	int				rc;
+	struct pci_device_iterator *pci_dev_iter;
+	struct pci_device          *pci_dev;
+	struct pci_id_match         match;
+	int                         rc;
+
+	const char *ealargs[] = { "identify", "-c 0x1", "-n 4", };
 
 	rc = rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]),
 			  (char **)(void *)(uintptr_t)ealargs);
 
 	if (rc < 0) {
-		fprintf(stderr, "could not initialize dpdk\n");
+		fprintf(stderr, "failed to initialize DPDK!\n");
 		exit(1);
 	}
 
@@ -450,18 +449,18 @@ int spdk_identity(void)
 					     NULL, NULL, NULL, NULL,
 					     SOCKET_ID_ANY, 0);
 
-	if (request_mempool == NULL) {
-		fprintf(stderr, "could not initialize request mempool\n");
+	if (NULL == request_mempool) {
+		fprintf(stderr, "failed to initialize request mempool!\n");
 		exit(1);
 	}
 
 	pci_system_init();
 
-	match.vendor_id =	PCI_MATCH_ANY;
-	match.subvendor_id =	PCI_MATCH_ANY;
-	match.subdevice_id =	PCI_MATCH_ANY;
-	match.device_id =	PCI_MATCH_ANY;
-	match.device_class =	NVME_CLASS_CODE;
+	match.vendor_id         = PCI_MATCH_ANY;
+	match.subvendor_id      = PCI_MATCH_ANY;
+	match.subdevice_id      = PCI_MATCH_ANY;
+	match.device_id         = PCI_MATCH_ANY;
+	match.device_class      = NVME_CLASS_CODE;    // 0x10802: PCI class code for NVMe devices.
 	match.device_class_mask = 0xFFFFFF;
 
 	pci_dev_iter = pci_id_match_iterator_create(&match);
@@ -471,18 +470,18 @@ int spdk_identity(void)
 		struct nvme_controller *ctrlr;
 
 		if (pci_device_has_non_null_driver(pci_dev)) {
-			fprintf(stderr, "non-null kernel driver attached to nvme\n");
-			fprintf(stderr, " controller at pci bdf %d:%d:%d\n",
+			fprintf(stderr, "non-null kernel driver attached to nvme!\n");
+			fprintf(stderr, "controller at PCI BDF %d:%d:%d\n",
 				pci_dev->bus, pci_dev->dev, pci_dev->func);
-			fprintf(stderr, " skipping...\n");
+			fprintf(stderr, "skipping...\n");
 			continue;
 		}
 
 		pci_device_probe(pci_dev);
 
 		ctrlr = nvme_attach(pci_dev);
-		if (ctrlr == NULL) {
-			fprintf(stderr, "failed to attach to NVMe controller at PCI BDF %d:%d:%d\n",
+		if (NULL == ctrlr) {
+			fprintf(stderr, "failed to attach to NVMe controller at PCI BDF %d:%d:%d!\n",
 				pci_dev->bus, pci_dev->dev, pci_dev->func);
 			rc = 1;
 			continue;

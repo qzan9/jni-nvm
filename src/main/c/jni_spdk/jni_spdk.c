@@ -14,8 +14,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
 		return JNI_ERR;
 	}
 
-	printf("hello world from JNI_OnLoad!\n");
-
 //	if (env->RegisterNatives(env->FindClass("Lac/ncic/syssw/jni/spdk/JniSpdk;"),
 	if ((*env)->RegisterNatives(env,
 	                            (*env)->FindClass(env, "Lac/ncic/syssw/jni/spdk/JniSpdk;"),
@@ -34,6 +32,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
 
 JNIEXPORT jint JNICALL spdkIdentify(JNIEnv *env, jobject thisObj)
 {
-	return spdk_identity();
+	return (jint) spdk_identity();
 }
 
