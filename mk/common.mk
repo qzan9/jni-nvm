@@ -59,7 +59,7 @@ ifeq ($(spdk),1)
 endif
 
 CC           := gcc
-CFLAGS       := -fPIC -fstack-protector -std=c99 $(ARCH) $(DEBUG) $(INCLUDES)
+CFLAGS       := -fPIC -fstack-protector -std=gnu99 $(ARCH) $(DEBUG) $(INCLUDES)
 CXX          := g++
 CXXFLAGS     := -fPIC $(ARCH) $(DEBUG) $(INCLUDES)
 
