@@ -1,7 +1,7 @@
 # project files
 PROJECT  := libjnispdk
 
-CFILES   := jni_spdk.c identify.c
+CFILES   := jni_spdk.c identify.c perf.c
 DEPFILES :=
 
 ROOT     := ../../../..
