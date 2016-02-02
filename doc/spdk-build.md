@@ -1,17 +1,5 @@
 # Build under CentOS 6.x #
 
-## Grant privilege ##
-
-invoke `visudo` as root and add the following
-
-    user    ALL=(ALL)    NOPASSWD: ALL
-
-to verify
-
-    $ su - user
-    $ cat /etc/shadow
-    $ sudo cat /etc/shadow
-
 ## Prerequisites ##
 
 install gcc; the version is 4.4.7 for CentOS 6.x.
