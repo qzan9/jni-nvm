@@ -1,4 +1,5 @@
 # global directory layout
+ROOT         := ../../../..
 BIN          := $(ROOT)/bin
 INC          := $(ROOT)/inc
 LIB          := $(ROOT)/lib
@@ -14,16 +15,17 @@ OBJFILES     := $(patsubst %.c,$(OBJDIR)/%.o,$(notdir $(CFILES))) \
 TARGETFILE   := $(OUTPUTDIR)/$(PROJECT)
 
 # Java path
-#JAVA_HOME    ?= /usr/lib/jvm/java-1.7.0
 JAVA_HOME    ?= /opt/jdk7
 
 # DPDK path
-DPDK_DIR     ?= /home/azq/build/dpdk-2.1.0/x86_64-native-linuxapp-gcc
+#DPDK_DIR     ?= /home/azq/build/dpdk-2.1.0/x86_64-native-linuxapp-gcc
+DPDK_DIR     ?= /home/azq/build/dpdk-2.2.0/x86_64-native-linuxapp-gcc
 
 # SPDK path
-SPDK_DIR     ?= /home/azq/build/spdk-af2a731
+#SPDK_DIR     ?= /home/azq/build/spdk-af2a731
+SPDK_DIR     ?= /home/azq/build/spdk-9322c25
 
-# compiler setup
+# architecutre
 AMD64 = $(shell uname -m | grep 64)
 ifeq "$(strip $(AMD64))" ""
     ARCH     := -m32
@@ -31,6 +33,7 @@ else
     ARCH     := -m64
 endif
 
+# debug info
 ifeq ($(dbg),1)
     DEBUG    := -g -D_DEBUG
     CONFIG   := debug
@@ -39,6 +42,7 @@ else
     CONFIG   := release
 endif
 
+# include headers
 INCLUDES     := -I$(PROJECTDIR) -I$(INC)
 ifeq ($(jni),1)
     INCLUDES += -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
@@ -47,15 +51,23 @@ ifeq ($(spdk),1)
     INCLUDES += -I$(SPDK_DIR)/include -I$(DPDK_DIR)/include
 endif
 
+# link libraries
 LIBRARIES    := -L$(LIB) -L$(OUTPUTDIR)
-ifeq ($(rdma),1)
+ifeq ($(ibv),1)
    LIBRARIES += -libverbs
 endif
 ifeq ($(spdk),1)
-   LIBRARIES += -L$(SPDK_DIR)/lib/nvme -L$(SPDK_DIR)/lib/memory -L$(SPDK_DIR)/lib/util \
-                -lpciaccess -lpthread \
-                -lspdk_nvme -lspdk_memory -lspdk_util \
-                -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt
+    ifeq ($(shared),1)
+        LIBRARIES += -L$(SPDK_DIR)/lib/nvme -L$(SPDK_DIR)/lib/memory -L$(SPDK_DIR)/lib/util \
+                     -lpciaccess -pthread \
+                     -lspdk_nvme -lspdk_memory -lspdk_util \
+                     -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt
+    else
+        LIBRARIES += $(SPDK_DIR)/lib/nvme/libspdk_nvme.a $(SPDK_DIR)/lib/util/libspdk_util.a $(SPDK_DIR)/lib/memory/libspdk_memory.a \
+                     -lpciaccess -pthread \
+                     -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt \
+		     -ldl
+    endif
 endif
 
 CC           := gcc
