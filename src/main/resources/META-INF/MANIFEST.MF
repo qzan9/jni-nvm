@@ -1,2 +1,2 @@
 Manifest-Version: 0.1.0
-Main-Class: ac.ncic.syssw.jni.spdk.Main
+Main-Class: ac.ncic.syssw.jni.Main

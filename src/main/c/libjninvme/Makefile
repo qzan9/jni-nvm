@@ -1,5 +1,5 @@
 # project files
-PROJECT  := libjnispdk
+PROJECT  := libjninvme
 
 CFILES   := jni_spdk.c identify.c perf.c
 DEPFILES :=
