@@ -2,7 +2,7 @@
 
 ## Prerequisites ##
 
-install gcc; the version is 4.4.7 for CentOS 6.x.
+install `gcc`; the version is 4.4.7 for CentOS 6.x.
 
     $ sudo yum install gcc
 
@@ -10,7 +10,7 @@ install `libpciaccess-devel`
 
     $ sudo yum install libpciaccess-devel
 
-install epel-repo
+install `CUnit-devel`; first prepare the epel-repo source
 
     $ wget http://dl.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-?.noarch.rpm
 
@@ -18,24 +18,29 @@ or
 
     $ wget https://dl.fedoraproject.org/pub/epel/epel-release-latest-6.noarch.rpm
 
-then
+and
 
     $ sudo rpm -Uvh epel-release-6-?.noarch.rpm
 
-then install CUnit-devel
+then
 
     $ sudo yum install CUnit-devel
+
+install `libaio-devel`
+
+    $ sudo yum install libaio-devel
 
 ## Download the sources ##
 
 download SPDK and DPDK source codes
 
-    $ git clone https://github.com/spdk/spdk.git
-    $ wget http://dpdk.org/browse/dpdk/snapshot/dpdk-2.1.0.tar.gz
-    $ tar zxvf dpdk-2.1.0.tar.gz
+    $ wget https://github.com/spdk/spdk/archive/master.zip
+    $ unzip master.zip
+    $ wget http://dpdk.org/browse/dpdk/snapshot/dpdk-2.2.0.tar.gz
+    $ tar zxvf dpdk-2.2.0.tar.gz
 
-since the gcc of CentOS 6.x doesn't support `_Static_assert`, try the following
-ugly fix for `include/spdk/nvme_spec.h`
+since the gcc of 4.4.7 doesn't support `_Static_assert`, try the following ugly
+fix for `include/spdk/nvme_spec.h`
 
     #define ASSERT_CONCAT_(a, b) a##b
     #define ASSERT_CONCAT(a, b) ASSERT_CONCAT_(a, b)
@@ -47,11 +52,14 @@ ugly fix for `include/spdk/nvme_spec.h`
             ;enum { ASSERT_CONCAT(assert_line_, __LINE__) = 1/(!!(e)) }
     #endif
 
+**NOTE** that commit `16a45d2` added a similar fallback macro for older version
+of gcc.
+
 ## Build NVMe driver ##
 
 first build DPDK
 
-    $ make install T=x86_64-native-linuxapp-gcc
+    $ make install T=x86_64-native-linuxapp-gcc DESTDIR=.
 
 to make compilation work, edit `/usr/include/linux/virtio_net.h` and fix that
 `u16` to `__u16`
@@ -60,9 +68,12 @@ to make compilation work, edit `/usr/include/linux/virtio_net.h` and fix that
         __u16 virtqueue_pairs;
     };
 
-**NOTE** that to link DPDK static libraries to a shared library (for JVM),
-libraries under `$(DPDK_DIR)/lib/*` should be compiled with `-fPIC` (to emit
-position-independent codes, suitable for dynamic linking).
+**NOTE** that to link DPDK static libraries to a shared library, libraries
+under `$(DPDK_DIR)/lib/*` should be compiled with `-fPIC` (to emit
+position-independent codes, suitable for dynamic linking), to do this, add
+`EXTRA_CFLAGS="-fPIC"` when invoking `make`, or edit `mk/target/generic/rte.vars.mk`
+
+    CFLAGS += $(TARGET_CFLAGS) -fPIC
 
 then build the NVMe driver
 
