@@ -61,7 +61,8 @@ ifeq ($(spdk),1)
         LIBRARIES += -L$(SPDK_DIR)/lib/nvme -L$(SPDK_DIR)/lib/memory -L$(SPDK_DIR)/lib/util \
                      -lpciaccess -pthread \
                      -lspdk_nvme -lspdk_memory -lspdk_util \
-                     -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt
+                     -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt \
+		     -ldl
     else
         LIBRARIES += $(SPDK_DIR)/lib/nvme/libspdk_nvme.a $(SPDK_DIR)/lib/util/libspdk_util.a $(SPDK_DIR)/lib/memory/libspdk_memory.a \
                      -lpciaccess -pthread \
