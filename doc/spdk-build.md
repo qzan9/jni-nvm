@@ -2,6 +2,10 @@
 
 ## Prerequisites ##
 
+update your CentOS 6.x to the latest version possible
+
+    $ sudo yum update
+
 install `gcc`; the version is 4.4.7 for CentOS 6.x.
 
     $ sudo yum install gcc
