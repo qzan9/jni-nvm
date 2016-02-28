@@ -122,6 +122,26 @@ then build SPDK with `$DPDK_DIR` specified
 
 ## Prepare for running SPDK/DPDK applications ##
 
+### Platform setup ###
+
+the following are some recommendations on BIOS settings:
+
+* disable all power saving options and select *Performance* as the CPU power policy.
+
+* disable turbo boost to ensure the performance scaling increases with the number of cores.
+
+* set memory frequency to the highest available number, NOT auto.
+
+for best performance, use an Xeon class server system such as Ivy Bridge, Haswell, or newer. ensure that each memory channel has at least one memory DIMM inserted, and that the memory size for each is at least 4GB. this has one of the most direct effects on performance.
+
+while the threads used by an SPDK/DPDK application are pinned to logical cores on the system, it is possible for the Linux scheduler to run other tasks in those cores also. to help prevent additional workloads from running on those cores, it is possible to use the `isolcpus` Linux kernel parameter to isolate them from the general Linux scheduler.
+
+for example, if SPDK/DPDK applications are to run on logical cores 2, 4 and 6, the following should be added to the kernel parameter list:
+
+    isolcpus=2,4,6
+
+### HugeTLBPage ###
+
 HugeTLBPage needs to be properly configured for SPDK/DPDK. for 2MB pages, just pass the hugepages option to the kernel, e.g., to reserve 2048 pages of 2MB, use:
 
     hugepages=2048
@@ -162,6 +182,8 @@ to make the mount point permanent across reboots, add the following line to `/et
 for 1G pages, specify the page size
 
     nodev /mnt/huge_1GB hugetlbfs pagesize=1GB 0 0
+
+### Userspace driver binding ###
 
 ~~NVMe devices must be umounted and kernel nvme module be removed, say~~
 
@@ -215,12 +237,6 @@ to get the `$ven_dev_id`
     $ lspci -n -s $bdf | cut -d' ' -f3 | sed 's/:/ /'
 
 note that for NVMe devices, the base class code is `01h`, subclass code is `08h`, and the programming interface is `02h` (NVM Express).
-
-while the threads used by an SPDK/DPDK application are pinned to logical cores on the system, it is possible for the Linux scheduler to run other tasks in those cores also. to help prevent additional workloads from running on those cores, it is possible to use the `isolcpus` Linux kernel parameter to isolate them from the general Linux scheduler.
-
-for example, if SPDK/DPDK applications are to run on logical cores 2, 4 and 6, the following should be added to the kernel parameter list:
-
-    isolcpus=2,4,6
 
 ## Running SPDK applications ##
 
