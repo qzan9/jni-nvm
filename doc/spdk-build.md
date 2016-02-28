@@ -1,4 +1,4 @@
-# Build under CentOS 6.x #
+# SPDK Getting Started under CentOS 6.x #
 
 ## Prerequisites ##
 
@@ -34,7 +34,7 @@ install `libaio-devel`
 
     $ sudo yum install libaio-devel
 
-## Download the sources ##
+## Download and prepare the sources ##
 
 download SPDK and DPDK source codes
 
@@ -43,9 +43,10 @@ download SPDK and DPDK source codes
     $ wget http://dpdk.org/browse/dpdk/snapshot/dpdk-2.2.0.tar.gz
     $ tar zxvf dpdk-2.2.0.tar.gz
 
-since the gcc of 4.4.7 doesn't support `_Static_assert`, try the following ugly
-fix for `include/spdk/nvme_spec.h`
+since the gcc of 4.4.7 doesn't support `_Static_assert`, try the following fix
+for `include/spdk/nvme_spec.h`
 
+```c
     #define ASSERT_CONCAT_(a, b) a##b
     #define ASSERT_CONCAT(a, b) ASSERT_CONCAT_(a, b)
     #ifdef __COUNTER__
@@ -55,22 +56,28 @@ fix for `include/spdk/nvme_spec.h`
         #define _Static_assert(e, m) \
             ;enum { ASSERT_CONCAT(assert_line_, __LINE__) = 1/(!!(e)) }
     #endif
+```
 
 **NOTE** that commit `16a45d2` added a similar fallback macro for older version
-of gcc.
+of gcc in `include/spdk/assert.h`.
 
-## Build NVMe driver ##
+to make DPDK compilation work, edit `/usr/include/linux/virtio_net.h` and
+modify the `u16` to `__u16`
+
+```c
+    struct virtio_net_ctrl_mq {
+        __u16 virtqueue_pairs;
+    };
+```
+
+**NOTE** that this bug has been fixed for newer version of CentOS (6.7) and
+DPDK (2.2.0).
+
+## Build the NVMe driver ##
 
 first build DPDK
 
     $ make install T=x86_64-native-linuxapp-gcc DESTDIR=.
-
-to make compilation work, edit `/usr/include/linux/virtio_net.h` and fix that
-`u16` to `__u16`
-
-    struct virtio_net_ctrl_mq {
-        __u16 virtqueue_pairs;
-    };
 
 **NOTE** that to link DPDK static libraries to a shared library, libraries
 under `$(DPDK_DIR)/lib/*` should be compiled with `-fPIC` (to emit
@@ -79,229 +86,133 @@ position-independent codes, suitable for dynamic linking), to do this, add
 
     CFLAGS += $(TARGET_CFLAGS) -fPIC
 
+to modify DPDK configuration and re-compile
+
+    $ cd /path/to/dpdk/x86_64-natinve-linuxapp-gcc
+    $ vi .config
+    $ make
+
 then build the NVMe driver
 
     $ make DPDK_DIR=/path/to/dpdk/x86_64-native-linuxapp-gcc
 
-before running SPDK applications, first umount the device and remove the kernel
-nvme module, say
+## Setup and run SPDK applications ##
 
-    $ sudo umount /dev/nvme0n1p1
+HugeTLBPage needs to be properly configured for SPDK/DPDK. for 2MB pages, just
+pass the hugepages option to the kernel, e.g., to reserve 2048 pages of 2MB,
+use:
+
+    hugepages=2048
+
+for CentOS 6.x, this requires you to edit `/etc/grub.conf`.
+
+to use 1G pages, use the following kernel options
+
+    default_hugepagesz=1G hugepagesze=1G hugepages=4
+
+check the CPU flags, if `pdpe1gb` exists, then 1G-hugepages is supported.
+
+for a dual-socket NUMA system, the number of hugepages reserved at boot time
+is generally divided equally between the two sockets if sufficient memory is
+present on both sockets.
+
+pages that are used as huge pages are reserved inside the kernel and cannot be
+used for other purposes.
+
+check `/proc/meminfo` to verify hugepage configuration
+
+    $ grep -i hugepage /proc/meminfo
+
+for 2MB pages, to modify the hugetlbpage configuration after the system has
+booted, try the following tweak:
+
+    $ sudo echo 2048 > /proc/sys/vm/nr_hugepages
+
+`nr_hugepages` indicates the current number of "persistent" huge pages in the
+kernel's huge page pool. the success or failure of huge page allocation
+depends on the amount of physically contiguous memory that is present in
+system at the time of the allocation attempt, so the dynamic allocation should
+be done as soon as possible after system boot to prevent memory from being
+fragmented in physically memory.
+
+DPDK relies on the "hugetlbfs" interface to access the huge pages. hugetlbfs
+is a RAM-based filesystem, and every file on this filesystem is backed by huge
+pages and is accessed with `mmap()` or `read()`. hugetlbfs is a bare interface
+to the huge page capabilities of the underlying hardware.
+
+to make hugetlbfs available for DPDK, perform the following steps:
+
+    $ sudo mkdir -p /mnt/huge
+    $ sudo mount -t hugetlbfs nodev /mnt/huge
+
+to make the mount point permanent across reboots, add the following line to
+`/etc/fstab`
+
+    nodev /mnt/huge hugetlbfs defaults 0 0
+
+for 1G pages, specify the page size
+
+    nodev /mnt/huge_1GB hugetlbfs pagesize=1GB 0 0
+
+~~NVMe devices must be umounted and kernel nvme module be removed, say~~
+
+    ~~$ sudo umount /dev/nvme0n1p1~~
+    ~~$ sudo rmmod nvme~~
+
+NVMe devices should be bound to `vfio-pci` or `uio_pci_generic`. VFIO driver
+is an IOMMU/device agnostic framework for exposing direct device access to
+userspace, in a secure, IOMMU protected environment. by contrast, the UIO
+framework has no notion of IOMMU protection, limited interrupt support, and
+requires root privilige to access things like PCI configuration space.
+
+to load `uio_pci_generic`
+
+    $ sudo modprobe uio_pci_generic
+
+DPDK also includes a uio module `igb_uio`, which may be needed for some devices
+which lack support for legacy interrupts, e.g. virutal function (VF) devices
+
+    $ sudo modprobe uio
+    $ sudo insmod kmod/igb_uio.ko
+
+DPDK release 1.7 onward provides VFIO support, and `vfio-pci` module must be
+loaded
+
+    $ sudo modprobe vfio-pci
+
+Note that in order to use VFIO, your kernel must support it. VFIO kernel
+modules have been included in the Linux kernel since version 3.6.0. also, to
+use VFIO, both kernel and BIOS must support and be configured to use I/O
+virtualization (such as Intel VT-d).
+
+to bind to VFIO/UIO, NVMe devices must be first unbound from NVMe kernel
+driver, to do so, unload the whole driver
+
     $ sudo rmmod nvme
 
-and set up HugeTLB
+or write the device location (in the format of `DDDD:BB:DD.F`) to the `unbind`
+node of the currently attached driver
 
-    $ sudo mkdir -p /mnt/hugetlb
-    $ sudo mount -t hugetlbfs nodev /mnt/hugetlb
-    $ sudo echo 1024 > /proc/sys/vm/nr_hugepages
+    $ echo $bdf > "/sys/bus/pci/devices/$bdf/driver/unbind"
 
-then run the applications, e.g. the `identity` example
+then write the device ID (in the format of `VVVV DDDD SVVV SDDD CCCC MMMM PPPP`)
+to the `new_id` node of the driver to be attached to
 
-    $ sudo ./identify
-    EAL: Detected lcore 0 as core 0 on socket 0
-    EAL: Detected lcore 1 as core 1 on socket 0
-    EAL: Detected lcore 2 as core 2 on socket 0
-    EAL: Detected lcore 3 as core 3 on socket 0
-    EAL: Detected lcore 4 as core 4 on socket 0
-    EAL: Detected lcore 5 as core 5 on socket 0
-    EAL: Detected lcore 6 as core 6 on socket 0
-    EAL: Detected lcore 7 as core 7 on socket 0
-    EAL: Detected lcore 8 as core 0 on socket 1
-    EAL: Detected lcore 9 as core 1 on socket 1
-    EAL: Detected lcore 10 as core 2 on socket 1
-    EAL: Detected lcore 11 as core 3 on socket 1
-    EAL: Detected lcore 12 as core 4 on socket 1
-    EAL: Detected lcore 13 as core 5 on socket 1
-    EAL: Detected lcore 14 as core 6 on socket 1
-    EAL: Detected lcore 15 as core 7 on socket 1
-    EAL: Detected lcore 16 as core 0 on socket 0
-    EAL: Detected lcore 17 as core 1 on socket 0
-    EAL: Detected lcore 18 as core 2 on socket 0
-    EAL: Detected lcore 19 as core 3 on socket 0
-    EAL: Detected lcore 20 as core 4 on socket 0
-    EAL: Detected lcore 21 as core 5 on socket 0
-    EAL: Detected lcore 22 as core 6 on socket 0
-    EAL: Detected lcore 23 as core 7 on socket 0
-    EAL: Detected lcore 24 as core 0 on socket 1
-    EAL: Detected lcore 25 as core 1 on socket 1
-    EAL: Detected lcore 26 as core 2 on socket 1
-    EAL: Detected lcore 27 as core 3 on socket 1
-    EAL: Detected lcore 28 as core 4 on socket 1
-    EAL: Detected lcore 29 as core 5 on socket 1
-    EAL: Detected lcore 30 as core 6 on socket 1
-    EAL: Detected lcore 31 as core 7 on socket 1
-    EAL: Support maximum 128 logical core(s) by configuration.
-    EAL: Detected 32 lcore(s)
-    EAL: Setting up physically contiguous memory...
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc806e00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc806a00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x3000000 bytes
-    EAL: Virtual area found at 0x7fc803800000 (size = 0x3000000)
-    EAL: Ask a virtual area of 0x8400000 bytes
-    EAL: Virtual area found at 0x7fc7fb200000 (size = 0x8400000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7f2800000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7e9e00000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7e1400000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7d8a00000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7d0000000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7c7600000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x400000 bytes
-    EAL: Virtual area found at 0x7fc7c7000000 (size = 0x400000)
-    EAL: Ask a virtual area of 0x400000 bytes
-    EAL: Virtual area found at 0x7fc7c6a00000 (size = 0x400000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c6600000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c6200000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c5e00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c5a00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c5600000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c5200000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c4e00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c4a00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c4600000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc7c4200000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x7800000 bytes
-    EAL: Virtual area found at 0x7fc7bc800000 (size = 0x7800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7b3e00000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7ab400000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc7a2a00000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc79a000000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc791600000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x8800000 bytes
-    EAL: Virtual area found at 0x7fc788c00000 (size = 0x8800000)
-    EAL: Ask a virtual area of 0x3e00000 bytes
-    EAL: Virtual area found at 0x7fc784c00000 (size = 0x3e00000)
-    EAL: Ask a virtual area of 0x400000 bytes
-    EAL: Virtual area found at 0x7fc784600000 (size = 0x400000)
-    EAL: Ask a virtual area of 0x400000 bytes
-    EAL: Virtual area found at 0x7fc784000000 (size = 0x400000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc783c00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc783800000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc783400000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc783000000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc782c00000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc782800000 (size = 0x200000)
-    EAL: Ask a virtual area of 0x200000 bytes
-    EAL: Virtual area found at 0x7fc782400000 (size = 0x200000)
-    EAL: Requesting 512 pages of size 2MB from socket 0
-    EAL: Requesting 512 pages of size 2MB from socket 1
-    EAL: TSC frequency is ~2394458 KHz
-    EAL: Master lcore 0 is ready (tid=74538a0;cpuset=[0])
-    =====================================================
-    NVMe Controller at PCI bus 4, device 0, function 0
-    =====================================================
-    Controller Capabilities/Features
-    ================================
-    Vendor ID:                  1c5f
-    Subsystem Vendor ID:        1c5f
-    Serial Number:
-    Model Number:               pblaze4-4T
-    Firmware Version:           0090280
-    Recommended Arb Burst:      1
-    IEEE OUI Identifier:        cf e0 00
-    Multi-Interface Cap:        00
-    Max Data Transfer Size:     131072
-    Error Recovery Timeout:     Unlimited
+    $ echo $ven_dev_id > "/sys/bus/pci/drivers/$driver_name/new_id"
 
-    Admin Command Set Attributes
-    ============================
-    Security Send/Receive:       Not Supported
-    Format NVM:                  Supported
-    Firmware Activate/Download:  Supported
-    Abort Command Limit:         4
-    Async Event Request Limit:   6
-    Number of Firmware Slots:    3
-    Firmware Slot 1 Read-Only:   Yes
-    Per-Namespace SMART Log:     Yes
-    Error Log Page Entries:      63
+then trigger a rescan of all PCI buses in the system
 
-    NVM Command Set Attributes
-    ==========================
-    Submission Queue Entry Size
-      Max:                       64
-      Min:                       64
-    Completion Queue Entry Size
-      Max:                       16
-      Min:                       16
-    Number of Namespaces:        1
-    Compare Command:             Not Supported
-    Write Uncorrectable Command: Not Supported
-    Dataset Management Command:  Supported
-    Volatile Write Cache:        Not Present
+    $ echo "1" > "/sys/bus/pci/rescan"
 
-    Arbitration
-    ===========
-    Arbitration Burst:           1
-    Low Priority Weight:         1
-    Medium Priority Weight:      1
-    High Priority Weight:        1
+to unregister the device and unbind from the driver
 
-    Power Management
-    ================
-    Number of Power States:      1
-    Current Power State:         Power State #0
-    Power State #0:  Max Power:  25.00 W
+    $ echo $ven_dev_id > "/sys/bus/pci/devices/$bdf/driver/remove_id"
+    $ echo $bdf > "/sys/bus/pci/drivers/nvme/bind"
 
-    Health Information
-    ==================
-    Critical Warnings:
-      Available Spare Space:     OK
-      Temperature:               OK
-      Device Reliability:        OK
-      Read Only:                 No
-      Volatile Memory Backup:    OK
-    Current Temperature:         302 Kelvin (29 Celsius)
-    Temperature Threshold:       343 Kelvin (70 Celsius)
-    Available Spare:             100%
-    Life Percentage Used:        0%
-    Data Units Read:             1616039
-    Data Units Written:          526650
-    Host Read Commands:          201573469
-    Host Write Commands:         65754805
-    Controller Busy Time:        0 minutes
-    Power Cycles:                0
-    Power On Hours:              1448 hours
-    Unsafe Shutdowns:            0
-    Unrecoverable Media Errors:  0
-    Lifetime Error Log Entries:  0
+to get the `$bdf` of the NVMe device
 
-    Namespace ID:1
-    Deallocate:                  Supported
-    Flush:                       Not Supported
-    Size (in LBAs):              6254624768 (5964M)
-    Capacity (in LBAs):          6254624768 (5964M)
-    Utilization (in LBAs):       6254624768 (5964M)
-    Thin Provisioning:           Not Supported
-    Number of LBA Formats:       2
-    Current LBA Format:          LBA Format #00
-    LBA Format #00: Data Size:   512  Metadata Size:     0
-    LBA Format #01: Data Size:  4096  Metadata Size:     0
+    $ lspci -mm -n | grep 0108 | tr -d '"' | awk -F " " '{print "0000:" $1}'
+
+note that for NVMe devices, the base class code is `01h`, subclass code is
+`08h`, and the programming interface is `02h` (NVM Express).
 
