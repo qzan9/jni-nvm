@@ -1,4 +1,4 @@
-# SPDK Getting Started on CentOS 6.x #
+# SPDK Getting Started Guide on CentOS 6.x #
 
 ## Prerequisites ##
 
@@ -80,6 +80,14 @@ first build DPDK
     $ cd /path/to/dpdk
     $ make install T=x86_64-native-linuxapp-gcc DESTDIR=.
 
+the format of a DPDK target is
+
+    ARCH-MACHINE-EXECENV-TOOLCHAIN
+
+to prepare a target withoug building it, for example, if the configuration changes need to be made before compilation
+
+    make config T=x86_64-native-linuxapp-gcc DESTDIR=.
+
 **NOTE** that to link DPDK static libraries to a shared library, libraries under `$(DPDK_DIR)/lib/*` should be compiled with `-fPIC` (to emit position-independent codes, suitable for dynamic linking), to do this, add `EXTRA_CFLAGS="-fPIC"` when invoking `make`, or edit `mk/target/generic/rte.vars.mk`
 
     CFLAGS += $(TARGET_CFLAGS) -fPIC
@@ -89,6 +97,23 @@ to modify DPDK configuration and re-compile
     $ cd /path/to/dpdk/x86_64-natinve-linuxapp-gcc
     $ vi .config
     $ make
+
+the `.config` file looks very like a kernel configuration file
+
+    CONFIG_RTE_EXEC_ENV="linuxapp"
+    CONFIG_RTE_EXEC_ENV_LINUXAPP=y
+    CONFIG_RTE_FORCE_INTRINSICS=n
+    CONFIG_RTE_ARCH_STRICT_ALIGN=n
+    CONFIG_RTE_BUILD_SHARED_LIB=n
+    CONFIG_RTE_BUILD_COMBINE_LIBS=n
+    CONFIG_RTE_NEXT_ABI=y
+    CONFIG_RTE_LIBRTE_EAL=y
+    CONFIG_RTE_MAX_LCORE=128
+    CONFIG_RTE_MAX_NUMA_NODES=8
+    CONFIG_RTE_MAX_MEMSEG=256
+    ... ...
+
+`make clean` can be used to remove any existing compiled files for a subsequent full, clean rebuild of the code.
 
 then build SPDK with `$DPDK_DIR` specified
 
@@ -158,7 +183,7 @@ DPDK release 1.7 onward provides VFIO support, and `vfio-pci` module must be loa
 
     $ sudo modprobe vfio-pci
 
-Note that in order to use VFIO, your kernel must support it. VFIO kernel modules have been included in the Linux kernel since version 3.6.0. also, to use VFIO, both kernel and BIOS must support and be configured to use I/O virtualization (such as Intel VT-d).
+Note that in order to use IOMMU, your kernel must support it, which means that kernel configurations of `IOMMU_SUPPORT`, `IOMMU_API` and `INTEL_IOMMU` must be set. VFIO kernel modules have been included in the Linux kernel since version 3.6.0. also, both kernel and BIOS must support and be configured to use I/O virtualization (such as Intel VT-d). when using `igb_uio` driver, the `iommu=pt` kernel parameter must be used, which results in passthrough of DMA-remapping lookup in the host. the `vfio-pci` driver can actually work with both `iommu=pt` and `iommu=on`.
 
 to bind to VFIO/UIO, NVMe devices must be first unbound from NVMe kernel driver, to do so, unload the whole driver
 
@@ -190,4 +215,54 @@ to get the `$ven_dev_id`
     $ lspci -n -s $bdf | cut -d' ' -f3 | sed 's/:/ /'
 
 note that for NVMe devices, the base class code is `01h`, subclass code is `08h`, and the programming interface is `02h` (NVM Express).
+
+while the threads used by an SPDK/DPDK application are pinned to logical cores on the system, it is possible for the Linux scheduler to run other tasks in those cores also. to help prevent additional workloads from running on those cores, it is possible to use the `isolcpus` Linux kernel parameter to isolate them from the general Linux scheduler.
+
+for example, if SPDK/DPDK applications are to run on logical cores 2, 4 and 6, the following should be added to the kernel parameter list:
+
+    isolcpus=2,4,6
+
+## Running SPDK applications ##
+
+since SPDK is actually an instance of DPDK, running an SPDK application requires EAL options to be properly given.
+
+EAL options are as follows:
+
+* `-c COREMASK`: an hexadecimal bit mask of the cores to run on; this option is *mandatory*.
+
+  each bit of the mask corresponds to the equivalent logical core number as reported by Linux. be careful with the core layout for your platform.
+
+* `-n NUM`: number of memory channels per processor socket.
+
+* `-b <domain:bus:devid.func>`: blacklisting of PCI functions.
+
+* `--use-device`: use the specified device(s) only. use comma-separate `[domain:]bus:devid.func` values.
+
+* `--socket-mem`: memory to allocate from hugepages on specific sockets. e.g., on a four socket system, `--socket-mem=1024,0,1024` will allocate 1GB memory on each of sockets 0 and 2 only.
+
+  `-m MB`: memory to allocate from hugepages, regardless of processor socket.
+
+  it is recommended to use the same amount of memory as that allocated for hugepages. if more memory is requested by explicitly passing a `--socket-mem` or `-m` value, the application fails.
+
+* `-r NUM`: number of memory ranks.
+
+* `-v`: display version information on startup.
+
+* `--huge-dir`: the directory where hugetlbfs is mounted.
+
+* `--file-prefix`: the prefix text used for hugepage filenames.
+
+* `--proc-type`: the type of process instance.
+
+* `--xen-dom0`: support application running on Xen Domain0 without hugetlbfs.
+
+* `--vmware-tsc-map`: use VMware TSC map instead of native RDTSC.
+
+* `--base-virtaddr`: specify base virtual address.
+
+* `--vfio-intr`: specify interrupt type to be used by VFIO.
+
+assuming the platform has four memory channels per processor socket, and that cores 0-3 are present and are to be used for running the application
+
+    $ sudo ./helloworld -c f -n 4
 
