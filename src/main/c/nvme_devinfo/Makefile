@@ -1,7 +1,7 @@
 # project files
-PROJECT  := nvme_controllers
+PROJECT  := nvme_devinfo
 
-CFILES   := nvme_controllers.c
+CFILES   := $(PROJECT).c
 DEPFILES :=
 
 spdk     := 1

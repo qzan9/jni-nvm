@@ -1,3 +1,23 @@
+/*
+ * nvme_devinfo
+ *
+ * display basic information of all the NVMe devices currently attached.
+ *
+ * for SPDK, this demonstrates the usage of:
+ *
+ * - spdk_nvme_probe(): enumerate the NVMe devices attached to the system and attach the userspace NVMe driver to them if desired.
+ *
+ * - spdk_nvme_detach(): detaches the specified device.
+ *
+ * - spdk_nvme_ctrlr_get_data(): get the identity controller data as defined by the NVMe specification.
+ *
+ * - spdk_nvme_ctrlr_cmd_get_log_page(): get a specific log page from the NVMe controller.
+ *
+ * - spdk_nvme_ctrlr_cmd_admin_raw(): a low-level interface to send the given admin command to the NVMe controller.
+ *
+ * - spdk_nvme_ctrlr_process_admin_completions(): process any outstanding completions for administration commands.
+ */
+
 #include <stdbool.h>
 #include <unistd.h>
 
@@ -16,10 +36,10 @@ struct feature {
 
 struct rte_mempool *request_mempool;
 
-static int outstanding_commands;
-
 static struct feature features[256];
 static struct spdk_nvme_health_information_page *health_page;
+
+static int outstanding_commands;
 
 static void
 print_uint128_hex(uint64_t *v)
@@ -51,8 +71,9 @@ get_feature_completion(void *cb_arg, const struct spdk_nvme_cpl *cpl)
 	int fid = feature - features;
 
 	if (spdk_nvme_cpl_is_error(cpl)) {
-		printf("get_feature(0x%02X) failed!\n", fid);
+		fprintf(stderr, "get_feature(0x%02X) failed!\n", fid);
 	} else {
+		/* record command dword 0. */
 		feature->result = cpl->cdw0;
 		feature->valid = true;
 	}
@@ -62,7 +83,7 @@ get_feature_completion(void *cb_arg, const struct spdk_nvme_cpl *cpl)
 static int
 get_feature(struct spdk_nvme_ctrlr *ctrlr, uint8_t fid)
 {
-	struct spdk_nvme_cmd cmd = {};
+	struct spdk_nvme_cmd cmd = {};    // 16-dword/64-bytes
 
 	cmd.opc = SPDK_NVME_OPC_GET_FEATURES;
 	cmd.cdw10 = fid;
@@ -89,7 +110,7 @@ get_features(struct spdk_nvme_ctrlr *ctrlr)
 		if (get_feature(ctrlr, features_to_get[i]) == 0) {
 			outstanding_commands++;
 		} else {
-			printf("get_feature(0x%02X) failed to submit command!\n", features_to_get[i]);
+			fprintf(stderr, "get_feature(0x%02X) failed to submit command!\n", features_to_get[i]);
 		}
 	}
 
@@ -103,7 +124,7 @@ static void
 get_log_page_completion(void *cb_arg, const struct spdk_nvme_cpl *cpl)
 {
 	if (spdk_nvme_cpl_is_error(cpl)) {
-		printf("get log page failed!\n");
+		fprintf(stderr, "get log page failed!\n");
 	}
 	outstanding_commands--;
 }
@@ -111,20 +132,28 @@ get_log_page_completion(void *cb_arg, const struct spdk_nvme_cpl *cpl)
 static int
 get_health_log_page(struct spdk_nvme_ctrlr *ctrlr)
 {
-	if (health_page == NULL) {
-		/* allocate zero'ed memory from the heap. */
+	if (NULL == health_page) {
+		/* allocate zero'ed memory from the RTE heap. */
 		health_page = rte_zmalloc("nvme health", sizeof(*health_page), 4096);
-	}
-	if (health_page == NULL) {
-		printf("failed to allocate health page!\n");
-		exit(1);
+		if (NULL == health_page) {
+			fprintf(stderr, "failed to allocate health page!\n");
+			return 1;
+		}
+		/*
+		 * using malloc would cause error "could not find 2MB vfn 0xf in DPDK mem config".
+		 */
+		/*health_page = malloc(sizeof(*health_page));
+		if (NULL == health_page) {
+			perror("health_page malloc");
+			return 1;
+		}*/
 	}
 
 	/* get health log page from the NVMe controller. */
 	if (spdk_nvme_ctrlr_cmd_get_log_page(ctrlr, SPDK_NVME_LOG_HEALTH_INFORMATION, SPDK_NVME_GLOBAL_NS_TAG,
 	                                     health_page, sizeof(*health_page), get_log_page_completion, NULL)) {
-		printf("spdk_nvme_ctrlr_cmd_get_log_page() failed!\n");
-		exit(1);
+		fprintf(stderr, "spdk_nvme_ctrlr_cmd_get_log_page() failed!\n");
+		return 1;
 	}
 
 	return 0;
@@ -139,7 +168,7 @@ get_log_pages(struct spdk_nvme_ctrlr *ctrlr)
 	if (get_health_log_page(ctrlr) == 0) {
 		outstanding_commands++;
 	} else {
-		printf("failed to get log page (SMART/health)!\n");
+		fprintf(stderr, "failed to get log page (SMART/health)!\n");
 	}
 
 	while (outstanding_commands) {
@@ -151,11 +180,9 @@ static void
 print_namespace(struct spdk_nvme_ns *ns)
 {
 	const struct spdk_nvme_ns_data *nsdata;
-	uint32_t                        i;
-	uint32_t                        flags;
+	uint32_t i;
 
 	nsdata = spdk_nvme_ns_get_data(ns);
-	flags  = spdk_nvme_ns_get_flags(ns);
 
 	printf("\t  Namespace ID: %d\n", spdk_nvme_ns_get_id(ns));
 	printf("\t    Size (in LBAs):         %lld (%lldM)\n", (long long)nsdata->nsze, (long long)nsdata->nsze/1024/1024);
@@ -171,15 +198,15 @@ static void
 print_controller(struct spdk_nvme_ctrlr *ctrlr, struct spdk_pci_device *pci_dev)
 {
 	const struct spdk_nvme_ctrlr_data *cdata;
-	uint8_t                            str[128];
-	uint32_t                           i;
+	uint8_t  str[128];
+	uint32_t i;
 
 	get_features(ctrlr);
 	get_log_pages(ctrlr);
 
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
-	printf("\nNVMe controller found at PCI bus %d, device %d, function %d\n",
+	printf("NVMe controller found at PCI bus %d, device %d, function %d\n",
 	       spdk_pci_device_get_bus(pci_dev), spdk_pci_device_get_dev(pci_dev), spdk_pci_device_get_func(pci_dev));
 	printf("\tVendor ID:                  %04x\n", cdata->vid);
 	printf("\tSubsystem Vendor ID:        %04x\n", cdata->ssvid);
@@ -220,7 +247,7 @@ probe_cb(void *cb_ctx, struct spdk_pci_device *dev)
 {
 	if (spdk_pci_device_has_non_uio_driver(dev)) {
 		fprintf(stderr, "non-uio kernel driver attached to the NVMe deivce!\n");
-		fprintf(stderr, "controller at PCI address %04x:%02x:%02x.%02x\n",
+		fprintf(stderr, "  controller at PCI address %04x:%02x:%02x.%02x\n",
 			spdk_pci_device_get_domain(dev),
 			spdk_pci_device_get_bus(dev),
 			spdk_pci_device_get_dev(dev),
@@ -242,7 +269,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *pci_dev, struct spdk_nvme_ctrlr 
 int main(int argc, char **argv)
 {
 	int rc;
-	const char *ealargs[] = { "nvme_devices", "-c 0x1", "-n 4", };
+	const char *ealargs[] = { "nvme_devinfo", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
 
 	/*
 	 * initialize DPDK EAL: set up hugepage memory and PCI bus access, and create a thread for each core.
@@ -255,7 +282,7 @@ int main(int argc, char **argv)
 			  (char **)(void *)(uintptr_t)ealargs);
 	if (rc < 0) {
 		fprintf(stderr, "failed to initialize DPDK EAL!\n");
-		exit(1);
+		return rc;
 	}
 
 	/*
@@ -273,8 +300,12 @@ int main(int argc, char **argv)
 					     SOCKET_ID_ANY, 0);
 	if (request_mempool == NULL) {
 		fprintf(stderr, "failed to initialize request mempool!\n");
-		exit(1);
+		return 1;
 	}
+
+	printf("\n==================================\n");
+	printf(  "  NVMe Info - ict.ncic.syssw.ufo"    );
+	printf("\n==================================\n");
 
 	/*
 	 * enumerate NVMe devices and attach them to userspace.
