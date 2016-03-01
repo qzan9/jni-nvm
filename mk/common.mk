@@ -15,15 +15,13 @@ OBJFILES     := $(patsubst %.c,$(OBJDIR)/%.o,$(notdir $(CFILES))) \
 TARGETFILE   := $(OUTPUTDIR)/$(PROJECT)
 
 # Java path
-JAVA_HOME    ?= /opt/jdk7
+JAVA_HOME    ?=
 
 # DPDK path
-#DPDK_DIR     ?= /home/azq/build/dpdk-2.1.0/x86_64-native-linuxapp-gcc
-DPDK_DIR     ?= /home/azq/build/dpdk-2.2.0/x86_64-native-linuxapp-gcc
+DPDK_DIR     ?=
 
 # SPDK path
-#SPDK_DIR     ?= /home/azq/build/spdk-af2a731
-SPDK_DIR     ?= /home/azq/build/spdk-9322c25
+SPDK_DIR     ?=
 
 # architecutre
 AMD64 = $(shell uname -m | grep 64)
