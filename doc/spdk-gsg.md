@@ -120,7 +120,25 @@ then build SPDK with `$DPDK_DIR` specified
     $ cd /path/to/spdk
     $ make DPDK_DIR=/path/to/dpdk/x86_64-native-linuxapp-gcc
 
-## Prepare for running SPDK/DPDK applications ##
+## To build with SPDK and DPDK ##
+
+to compile and link with SPDK, add the following gcc options
+
+    -I$(SPDK_DIR)/include $(SPDK_DIR)/lib/nvme/libspdk_nvme.a $(SPDK_DIR)/lib/memory/libspdk_memory.a $(SPDK_DIR)/lib/util/libspdk_util.a
+
+or
+
+    -I$(SPDK_DIR)/include -L$(SPDK_DIR)/lib/nvme -L$(SPDK_DIR)/lib/memory -L$(SPDK_DIR)/lib/util -lspdk_nvme -lspdk_memory -lspdk_util
+
+using the DPDK implementation in `lib/nvme/nvme_impl.h`, DPDK headers and libraries should also be added
+
+    -I$(DPDK_DIR)/include -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt
+
+for DPDK, link pthreads `-pthread` and dynamic loader `-ldl`.
+
+if using `libpciaccess`, add `-lpciaccess`.
+
+## Prepare for running SPDK applications ##
 
 ### Platform setup ###
 
