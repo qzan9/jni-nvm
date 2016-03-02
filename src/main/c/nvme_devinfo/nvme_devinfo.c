@@ -266,10 +266,11 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *pci_dev, struct spdk_nvme_ctrlr 
 	spdk_nvme_detach(ctrlr);
 }
 
+static char *ealargs[] = { "nvme_devinfo", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
+
 int main(int argc, char **argv)
 {
 	int rc;
-	const char *ealargs[] = { "nvme_devinfo", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
 
 	/*
 	 * initialize DPDK EAL: set up hugepage memory and PCI bus access, and create a thread for each core.
