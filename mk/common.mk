@@ -14,13 +14,9 @@ OBJFILES     := $(patsubst %.c,$(OBJDIR)/%.o,$(notdir $(CFILES))) \
                 $(patsubst %.cpp,$(OBJDIR)/%.o,$(notdir $(CCFILES)))
 TARGETFILE   := $(OUTPUTDIR)/$(PROJECT)
 
-# Java path
+# 3rd-party SDK path
 JAVA_HOME    ?=
-
-# DPDK path
 DPDK_DIR     ?=
-
-# SPDK path
 SPDK_DIR     ?=
 
 # architecutre
@@ -55,27 +51,21 @@ ifeq ($(ibv),1)
    LIBRARIES += -libverbs
 endif
 ifeq ($(spdk),1)
-    ifeq ($(shared),1)
-        LIBRARIES += -L$(SPDK_DIR)/lib/nvme -L$(SPDK_DIR)/lib/memory -L$(SPDK_DIR)/lib/util \
-                     -lpciaccess -pthread \
-                     -lspdk_nvme -lspdk_memory -lspdk_util \
-                     -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt \
-		     -ldl
-    else
-        LIBRARIES += $(SPDK_DIR)/lib/nvme/libspdk_nvme.a $(SPDK_DIR)/lib/util/libspdk_util.a $(SPDK_DIR)/lib/memory/libspdk_memory.a \
-                     -lpciaccess -pthread \
-                     -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt \
-		     -ldl
-    endif
+   LIBRARIES += -L$(SPDK_DIR)/lib/nvme -L$(SPDK_DIR)/lib/memory -L$(SPDK_DIR)/lib/util \
+                -lspdk_nvme -lspdk_memory -lspdk_util \
+                -L$(DPDK_DIR)/lib -lrte_eal -lrte_mempool -lrte_ring -Wl,-rpath=$(DPDK_DIR)/lib -lrt \
+                -lpciaccess -ldl -pthread
 endif
 
+# compiler
 CC           := gcc
 CFLAGS       := -fPIC -fstack-protector -std=gnu99 $(ARCH) $(DEBUG) $(INCLUDES)
 CXX          := g++
 CXXFLAGS     := -fPIC $(ARCH) $(DEBUG) $(INCLUDES)
 
+# linker
 LINK         := g++
-LDFLAGS     := -fPIC -Wl,-rpath -Wl,\$$ORIGIN
+LDFLAGS      := -fPIC -Wl,-rpath -Wl,\$$ORIGIN
 ifeq ($(shared),1)
      LDFLAGS += -shared
   TARGETFILE := $(addsuffix .so,$(TARGETFILE))
