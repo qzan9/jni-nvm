@@ -1,7 +1,7 @@
 /*
  * nvme_perftest
  *
- * do the same I/O perftest to all of the NVMe namespaces in the system.
+ *   do same I/O perftest to all of the NVMe namespaces attached to the system.
  */
 
 #include <stdio.h>
@@ -13,6 +13,7 @@
 #include <rte_config.h>
 #include <rte_cycles.h>
 #include <rte_mempool.h>
+#include <rte_memory.h>
 #include <rte_malloc.h>
 #include <rte_lcore.h>
 
@@ -20,6 +21,11 @@
 #include <spdk/nvme.h>
 #include <spdk/pci.h>
 #include <spdk/string.h>
+
+#define NVME_REQUEST_POOL_SIZE     2048
+#define NVME_REQUEST_CACHE_SIZE    256
+#define TASK_POOL_SIZE             4096
+#define TASK_CACHE_SIZE            512
 
 struct ctrlr_entry {
 	char name[256];
@@ -32,15 +38,15 @@ struct ns_entry {
 	char name[256];
 	struct spdk_nvme_ctrlr *ctrlr;
 	struct spdk_nvme_ns    *ns;
-	uint32_t io_size_blocks;    // payload size in blocks/LBs: g_io_size_bytes / sector_size
-	uint64_t size_in_ios;       // number of containable payloads: sector_size * sector_num / g_io_size_bytes
+	uint32_t io_size_blocks;         // payload size in blocks/LBs: g_io_size_bytes / sector_size
+	uint64_t size_in_ios;            // number of containable payloads: sector_size * sector_num / g_io_size_bytes
 
 	struct ns_entry *next;
 };
 
 struct ns_worker_ctx {
 	struct ns_entry *ns_ent;
-	uint64_t offset_in_ios;    // addressed by payload-size: sequential or random R/W?
+	uint64_t offset_in_ios;          // addressed by payload-size: sequential or random R/W?
 	uint64_t current_queue_depth;
 	uint64_t io_completed;
 	bool is_draining;
@@ -49,7 +55,7 @@ struct ns_worker_ctx {
 };
 
 struct worker_thread {
-	unsigned lcore;    // iD of the logical core.
+	unsigned lcore;                  // iD of the logical core.
 	struct ns_worker_ctx *ns_ctx;
 
 	struct worker_thread *next;
@@ -57,10 +63,10 @@ struct worker_thread {
 
 struct perf_task {
 	struct ns_worker_ctx *ns_ctx;
-	void *buf;    // be allocated in hugepage memory, see task_ctor().
+	void *buf;                       // be allocated in hugepage memory, see task_ctor().
 };
 
-struct rte_mempool *request_mempool;    // pool for nvme requests.
+struct rte_mempool *request_mempool;     // pool for nvme requests, defined in `lib/nvme/nvme_impl.h`.
 
 static struct ctrlr_entry *g_controllers = NULL;
 
@@ -70,12 +76,11 @@ static int              g_num_namespaces = 0;
 static struct worker_thread   *g_workers = NULL;
 static int                 g_num_workers = 0;
 
-static uint32_t g_io_size_bytes;    // payload size
+static uint32_t g_io_size_bytes;         // payload size
 static int      g_is_random;
 static int      g_rw_percentage;
-
 static int      g_queue_depth;
-static uint32_t g_max_completions;    // 0 for unlimited.
+static uint32_t g_max_completions;       // 0 for unlimited.
 
 static struct rte_mempool *task_pool;    // a pool of perf_task.
 
@@ -113,7 +118,7 @@ static int  associate_workers_with_ns(void);
 static void unregister_workers(void);
 
 /*
- * each lcore submits I/O requests to each namespace according to user-specified queue depth.
+ * each lcore submits I/O requests to all the assigned namespaces according to user-specified queue depth.
  *
  * the io_complete callback would keep on submitting new I/O request if not "timeout"ed.
  *
@@ -132,13 +137,13 @@ static void check_io(struct ns_worker_ctx *);
 static void drain_io(struct ns_worker_ctx *);
 
 /*
- * iterate each namespace context of each thread, and calculate the performance.
+ * iterate all threads to access the assigned test context, calculate and display the performance statistics.
  */
 
 static void print_perf(void);
 
 /*
- * the task_perf object initialization routine for task pool creation.
+ * the task_perf object initialization/release routines for task pool.
  */
 
 static void task_ctor(struct rte_mempool *, void *, void *, unsigned);
@@ -152,7 +157,7 @@ static void usage(char *);
 static int parse_args(int, char**);
 
 /*
- * nvme_perftest ...
+ * nvme_perftest main.
  */
 
 int main(int argc, char **argv)
@@ -162,7 +167,7 @@ int main(int argc, char **argv)
 
 	/* check the arguments. */
 	rc = parse_args(argc, argv);
-	if (rc != 0) {
+	if (rc) {
 		return rc;
 	}
 
@@ -185,8 +190,8 @@ int main(int argc, char **argv)
 
 	/* reserve a pool of nvme_requests. */
 	request_mempool = rte_mempool_create("nvme_request",
-	                                     1024, spdk_nvme_request_size(),
-	                                     128, 0,
+	                                     NVME_REQUEST_POOL_SIZE, spdk_nvme_request_size(),
+	                                     NVME_REQUEST_CACHE_SIZE, 0,
 	                                     NULL, NULL, NULL, NULL,
 	                                     SOCKET_ID_ANY, 0);
 	if (NULL == request_mempool) {
@@ -194,10 +199,10 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/* task_ctor will initialize each perf_test object. */
+	/* task_ctor will initialize each perf_test object, and buf memory would be allocated from hugepage. */
 	task_pool = rte_mempool_create("task_pool",
-	                               4096, sizeof(struct perf_task),
-	                               512, 0,
+	                               TASK_POOL_SIZE, sizeof(struct perf_task),
+	                               TASK_CACHE_SIZE, 0,
 	                               NULL, NULL, task_ctor, NULL,
 	                               SOCKET_ID_ANY, 0);
 	if (NULL == task_pool) {
@@ -209,17 +214,9 @@ int main(int argc, char **argv)
 	g_tsc_rate = rte_get_timer_hz();
 
 	/* probe NVMe devices and prepare lcore threads. */
-	if (register_ctrlrs()) {
-		return 1;
-	}
-
-	if (register_workers()) {
-		return 1;
-	}
-
-	if (associate_workers_with_ns()) {
-		return 1;
-	}
+	if (register_ctrlrs() ) { return 1; }
+	if (register_workers()) { return 1; }
+	if (associate_workers_with_ns()) { return 1; }
 
 	/* first launch all of the slave workers. */
 	worker = g_workers->next;
@@ -228,7 +225,7 @@ int main(int argc, char **argv)
 		worker = worker->next;
 	}
 
-	/* master lcore starts testing. */
+	/* then master lcore starts testing. */
 	rc = work_fn(g_workers);
 
 	/* wait for each lcore to finish its job. */
@@ -240,18 +237,25 @@ int main(int argc, char **argv)
 		worker = worker->next;
 	}
 
-	/* display the performance statistics. */
+	/* display the statistics. */
 	print_perf();
 
 	/* release resources. */
-	//rte_mempool_obj_iter(...);
 	unregister_workers();
 	unregister_ns();
 	unregister_ctrlrs();
 
+	/* TODO: corretly free buffer resources; this is doubtful ... */
+	if (rte_mempool_obj_iter((void *)task_pool->elt_va_start + RTE_CACHE_LINE_SIZE,
+	                         task_pool->size, rte_mempool_calc_obj_size(sizeof(struct perf_task), 0, NULL),
+	                         RTE_CACHE_LINE_SIZE, task_pool->elt_pa, task_pool->pg_num, task_pool->pg_shift,
+	                         task_free, NULL) != TASK_POOL_SIZE) {
+		fprintf(stderr, "oops, error releasing the buffers!\n");
+		return 1;
+	}
+
 	if (rc) {
-		fprintf(stderr, "%s: errors occurred\n", argv[0]);
-		return rc;
+		fprintf(stderr, "oops, errors occurred!\n");
 	}
 
 	return rc;
@@ -520,7 +524,7 @@ work_fn(void *arg)
 
 	worker = (struct worker_thread *)arg;
 
-	printf("start testing on core %u ...\n", worker->lcore);
+	printf("start benchmarking on core %u ...\n", worker->lcore);
 
 	tsc_end = rte_get_timer_cycles() + g_time_in_sec * g_tsc_rate;
 
@@ -687,22 +691,23 @@ static void
 task_ctor(struct rte_mempool *mp, void *arg, void *__task, unsigned id)
 {
 	struct perf_task *task = __task;
-	/* allocate memory from the huge-page area. */
-	task->buf = rte_malloc(NULL, g_io_size_bytes, 0x200);
+	task->buf = rte_malloc(NULL, g_io_size_bytes, 0x200);    // allocate memory from the huge-page area.
 	if (NULL == task->buf) {
 		fprintf(stderr, "task->buf rte_malloc failed!\n");
 		exit(1);
 	}
+
+//	printf("task_ctor: %p\n", task);
 }
 
-//static void
-//task_free(void *, void *, void *, uint32_t)
-//{
-//}
+static void
+task_free(void *arg, void *start, void *end, uint32_t i)
+{
+	struct perf_task *task = start;
+	rte_free(task->buf);
 
-/*
- * arguments display and analysis.
- */
+//	printf("task_free: %p\n", task);
+}
 
 static void
 usage(char *program_name)
@@ -823,3 +828,4 @@ parse_args(int argc, char **argv)
 
 	return 0;
 }
+
