@@ -52,6 +52,7 @@ test/
 # Visual Studio files
 .vs
 *.opensdf
+*.VC.opendb
 *.sdf
 *.suo
 *.vcxproj.user
