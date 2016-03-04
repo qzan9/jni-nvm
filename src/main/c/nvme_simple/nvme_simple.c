@@ -3,7 +3,7 @@
  *
  *   pick the first namespace of the first probed NVMe device and do some simple test.
  *
- *   limited to just ONE thread and ONE namespace.
+ *   RESTRICTED to just ONE thread and ONE namespace.
  */
 
 #include <stdio.h>
@@ -93,6 +93,7 @@ parse_args(int argc, char **argv)
 
 	u2_cfg->ns_id = U2_NAMESPACE_ID;
 
+	/* -s io_size -q queue_depth -w workload */
 	while ((op = getopt(argc, argv, "s:q:w:")) != -1) {
 		switch (op) {
 		case 's':
@@ -120,19 +121,19 @@ parse_args(int argc, char **argv)
 	if (!workload || strcmp(workload, "read")     && strcmp(workload, "write")   &&
 	                 strcmp(workload, "randread") && strcmp(workload, "randwrite")) {
 		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw = U2_READ;
+		u2_cfg->is_rw     = U2_READ;
 	} else if (!strcmp(workload, "read")) {
 		u2_cfg->is_random = U2_SEQUENTIAL;
-		u2_cfg->is_rw = U2_READ;
+		u2_cfg->is_rw     = U2_READ;
 	} else if (!strcmp(workload, "write")) {
 		u2_cfg->is_random = U2_SEQUENTIAL;
-		u2_cfg->is_rw = U2_WRITE;
+		u2_cfg->is_rw     = U2_WRITE;
 	} else if (!strcmp(workload, "randread")) {
 		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw = U2_READ;
+		u2_cfg->is_rw     = U2_READ;
 	} else if (!strcmp(workload, "randwrite")) {
 		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw = U2_WRITE;
+		u2_cfg->is_rw     = U2_WRITE;
 	}
 
 	return 0;
@@ -141,6 +142,7 @@ parse_args(int argc, char **argv)
 static bool
 probe_cb(void *cb_ctx, struct spdk_pci_device *dev)
 {
+	/* just attach to the firstly probed NVMe device. */
 	if (u2_ctx->ctrlr) {
 		return false;
 	} else {
@@ -172,7 +174,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
-	/* finish initializing the whole "u2" context. */
+	/* finish "u2" context setup. */
 	u2_ctx->ctrlr = ctrlr;
 	snprintf(u2_ctx->ctrlr_name, sizeof(u2_ctx->ctrlr_name), "%s (%s)", cdata->mn, cdata->sn);
 	u2_ctx->ns_num = spdk_nvme_ctrlr_get_num_ns(u2_ctx->ctrlr);
@@ -185,7 +187,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 }
 
 static int
-u2_init()
+u2_init(void)
 {
 	int i, rc;
 
@@ -230,13 +232,13 @@ u2_init()
 
 	u2_ctx->tsc_rate    = rte_get_timer_hz();
 
-	/* probe and attach the namespace. */
+	/* probe and attach to the namespace. */
 	if (spdk_nvme_probe(NULL, probe_cb, attach_cb)) {
 		fprintf(stderr, "failed to probe and attach to NVMe device!\n");
 		return 1;
 	}
 
-	/* allocate a group of buffers aligned to 512-byte. */
+	/* allocate a group of buffers aligned to 512-byte from hugepages. */
 	u2_ctx->buf = malloc(u2_ctx->queue_depth * sizeof(void *));
 	if (u2_ctx->buf == NULL) {
 		fprintf(stderr, "failed to malloc buffer!\n");
@@ -258,6 +260,7 @@ u2_io_complete(void *cb_args, const struct spdk_nvme_cpl *completion)
 {
 	struct u2_context *u2_ctx = (struct u2_context *)cb_args;
 
+	/* count the I/O completions. */
 	u2_ctx->io_completed++;
 }
 
@@ -290,6 +293,7 @@ u2_perf_test()
 
 	u2_ctx->tsc_start = rte_get_timer_cycles();
 
+	/* submit I/O requests of number of queue_depth. */
 	for (i = 0; i < u2_ctx->queue_depth; i++) {
 		if (u2_ctx->is_random) {
 			offset_in_ios = rand_r(&seed) % size_in_ios;
@@ -314,6 +318,7 @@ u2_perf_test()
 		}
 	}
 
+	/* polling/busy-waiting for the completions. */
 	while (u2_ctx->io_completed != u2_ctx->queue_depth - 1) {
 		spdk_nvme_ctrlr_process_io_completions(u2_ctx->ctrlr, 0);
 	}
@@ -322,6 +327,7 @@ u2_perf_test()
 
 	spdk_nvme_unregister_io_thread();
 
+	/* calculate and display the performance statistics. */
 	elapsed_time = (u2_ctx->tsc_end - u2_ctx->tsc_start) * 1000 * 1000 / u2_ctx->tsc_rate;
 	io_per_sec = (float)u2_ctx->io_completed * 1000 * 1000 / elapsed_time;
 	mb_per_sec = io_per_sec * u2_ctx->io_size / (1024 * 1024);
