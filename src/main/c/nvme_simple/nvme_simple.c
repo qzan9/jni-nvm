@@ -93,7 +93,7 @@ parse_args(int argc, char **argv)
 
 	u2_cfg->ns_id = U2_NAMESPACE_ID;
 
-	while ((op = getopt(argc, argv, "s:q:w")) != -1) {
+	while ((op = getopt(argc, argv, "s:q:w:")) != -1) {
 		switch (op) {
 		case 's':
 			u2_cfg->io_size = atoi(optarg);
@@ -111,35 +111,18 @@ parse_args(int argc, char **argv)
 
 	if (!u2_cfg->io_size) {
 		u2_cfg->io_size = U2_IO_SIZE;
-		printf("using default I/O size: %d\n", u2_cfg->io_size);
 	}
 
 	if (!u2_cfg->queue_depth) {
 		u2_cfg->queue_depth = U2_QUEUE_DEPTH;
-		printf("using default queue depth: %d\n", u2_cfg->queue_depth);
 	}
 
-	u2_cfg->is_random = U2_RANDOM;
-	u2_cfg->is_rw = U2_READ;
-
-	// below is buggy.
-/*	if (!workload) {
+	if (!workload || (strcmp(workload, "read") &&
+				strcmp(workload, "write") &&
+				strcmp(workload, "randread") &&
+				strcmp(workload, "randwrite"))) {
 		u2_cfg->is_random = U2_RANDOM;
 		u2_cfg->is_rw = U2_READ;
-		printf("using default RW mode: %s %s\n", 
-			u2_cfg->is_random ? "random" : "sequential",
-			u2_cfg->is_rw ? "read" : "write");
-	}
-
-	if (strcmp(workload, "read") &&
-		strcmp(workload, "write") &&
-		strcmp(workload, "randread") &&
-		strcmp(workload, "randwrite")) {
-		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw = U2_READ;
-		printf("using default RW mode: %s %s\n", 
-			u2_cfg->is_random ? "random" : "sequential",
-			u2_cfg->is_rw ? "read" : "write");
 	} else {
 		if (!strcmp(workload, "read")) {
 			u2_cfg->is_random = U2_SEQUENTIAL;
@@ -160,7 +143,7 @@ parse_args(int argc, char **argv)
 			u2_cfg->is_random = U2_RANDOM;
 			u2_cfg->is_rw = U2_WRITE;
 		}
-	}*/
+	}
 
 	return 0;
 }
@@ -353,9 +336,12 @@ u2_perf_test()
 	spdk_nvme_unregister_io_thread();
 
 	elapsed_time = (u2_ctx->tsc_end - u2_ctx->tsc_start) * 1000 * 1000 / u2_ctx->tsc_rate;
-	printf("elapsed time: %d us\n", elapsed_time);
 	io_per_sec = (float)u2_ctx->io_completed * 1000 * 1000 / elapsed_time;
 	mb_per_sec = io_per_sec * u2_ctx->io_size / (1024 * 1024);
+
+	printf("I/O size: %d, queue depth: %d\n", u2_ctx->io_size, u2_ctx->queue_depth);
+	printf("RW mode: %s %s\n", u2_cfg->is_random ? "random" : "sequential", u2_cfg->is_rw ? "read" : "write");
+	printf("elapsed time: %d us\n", elapsed_time);
 	printf("IO: %.2f IO/s, Bandwidth: %.2f MB/s\n", io_per_sec, mb_per_sec);
 
 	return 0;
@@ -381,7 +367,10 @@ int main(int argc, char *argv[])
 {
 	/* parse the arguments. */
 	if (parse_args(argc, argv)) {
-		fprintf(stderr, "failed to parse arguments!\n");
+		printf("usage: %s [OPTION]...\n", argv[0]);
+		printf("\t-s IO size in bytes\n");
+		printf("\t-q IO queue depth\n");
+		printf("\t-w IO pattern, must be one of (read, write, randread, randwrite)\n");
 		return 1;
 	}
 
