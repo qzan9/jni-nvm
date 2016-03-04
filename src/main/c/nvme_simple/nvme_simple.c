@@ -18,13 +18,13 @@
 
 #include <spdk/nvme.h>
 
-#define U2_REQUEST_POOL_SIZE		(2048)
+#define U2_REQUEST_POOL_SIZE		(8192)
 #define U2_REQUEST_CACHE_SIZE		(128)
 #define U2_REQUEST_PRIVATE_SIZE		(0)
 
 #define U2_NAMESPACE_ID			(1)
 
-#define U2_QUEUE_DEPTH			(1024)
+#define U2_QUEUE_DEPTH			(7168)
 
 #define U2_IO_SIZE			(4096)
 #define U2_BUFFER_ALIGN			(0x200)
@@ -81,8 +81,8 @@ static char *ealargs[] = { "nvme_simple", "-c 0x1", "-n 4", };
 static int
 parse_args(int argc, char **argv)
 {
-	const char *workload;
 	int op;
+	const char *workload;
 
 	u2_cfg = malloc(sizeof(struct u2_user));
 	if (u2_cfg == NULL) {
@@ -117,32 +117,22 @@ parse_args(int argc, char **argv)
 		u2_cfg->queue_depth = U2_QUEUE_DEPTH;
 	}
 
-	if (!workload || (strcmp(workload, "read") &&
-				strcmp(workload, "write") &&
-				strcmp(workload, "randread") &&
-				strcmp(workload, "randwrite"))) {
+	if (!workload || strcmp(workload, "read")     && strcmp(workload, "write")   &&
+	                 strcmp(workload, "randread") && strcmp(workload, "randwrite")) {
 		u2_cfg->is_random = U2_RANDOM;
 		u2_cfg->is_rw = U2_READ;
-	} else {
-		if (!strcmp(workload, "read")) {
-			u2_cfg->is_random = U2_SEQUENTIAL;
-			u2_cfg->is_rw = U2_READ;
-		}
-
-		if (!strcmp(workload, "write")) {
-			u2_cfg->is_random = U2_SEQUENTIAL;
-			u2_cfg->is_rw = U2_WRITE;
-		}
-
-		if (!strcmp(workload, "randread")) {
-			u2_cfg->is_random = U2_RANDOM;
-			u2_cfg->is_rw = U2_READ;
-		}
-
-		if (!strcmp(workload, "randwrite")) {
-			u2_cfg->is_random = U2_RANDOM;
-			u2_cfg->is_rw = U2_WRITE;
-		}
+	} else if (!strcmp(workload, "read")) {
+		u2_cfg->is_random = U2_SEQUENTIAL;
+		u2_cfg->is_rw = U2_READ;
+	} else if (!strcmp(workload, "write")) {
+		u2_cfg->is_random = U2_SEQUENTIAL;
+		u2_cfg->is_rw = U2_WRITE;
+	} else if (!strcmp(workload, "randread")) {
+		u2_cfg->is_random = U2_RANDOM;
+		u2_cfg->is_rw = U2_READ;
+	} else if (!strcmp(workload, "randwrite")) {
+		u2_cfg->is_random = U2_RANDOM;
+		u2_cfg->is_rw = U2_WRITE;
 	}
 
 	return 0;
@@ -233,7 +223,7 @@ u2_init()
 	u2_ctx->ns_id       = u2_cfg->ns_id;
 
 	u2_ctx->io_size     = u2_cfg->io_size;
-	u2_ctx->queue_depth = u2_cfg->queue_depth;
+	u2_ctx->queue_depth = (u2_cfg->queue_depth < U2_REQUEST_POOL_SIZE) ? u2_cfg->queue_depth : U2_QUEUE_DEPTH;
 
 	u2_ctx->is_random   = u2_cfg->is_random;
 	u2_ctx->is_rw       = u2_cfg->is_random;
@@ -268,15 +258,13 @@ u2_io_complete(void *cb_args, const struct spdk_nvme_cpl *completion)
 {
 	struct u2_context *u2_ctx = (struct u2_context *)cb_args;
 
-	if (++u2_ctx->io_completed == u2_ctx->queue_depth) {
-		u2_ctx->tsc_end = rte_get_timer_cycles();
-	}
+	u2_ctx->io_completed++;
 }
 
 static int
 u2_perf_test()
 {
-	uint32_t n, cpl;
+	int i, rc;
 
 	uint32_t io_size_blocks;
 
@@ -286,9 +274,10 @@ u2_perf_test()
 	int elapsed_time;
 	float io_per_sec, mb_per_sec;
 
-	int rc;
-
 	printf("u2 benchmarking started ...\n");
+	printf("\tper I/O size: %d B, queue depth: %d\n", u2_ctx->io_size, u2_ctx->queue_depth);
+	printf("\ttotal I/O size: %d MB\n", u2_ctx->io_size * u2_ctx->queue_depth / 1024 / 1024);
+	printf("\tRW mode: %s %s\n", u2_cfg->is_random ? "random" : "sequential", u2_cfg->is_rw ? "read" : "write");
 
 	io_size_blocks = u2_ctx->io_size / u2_ctx->ns_sector_size;
 	offset_in_ios  = -1;
@@ -300,7 +289,8 @@ u2_perf_test()
 	}
 
 	u2_ctx->tsc_start = rte_get_timer_cycles();
-	for (n = 0; n < u2_ctx->queue_depth; n++) {
+
+	for (i = 0; i < u2_ctx->queue_depth; i++) {
 		if (u2_ctx->is_random) {
 			offset_in_ios = rand_r(&seed) % size_in_ios;
 		} else {
@@ -311,27 +301,24 @@ u2_perf_test()
 		}
 
 		if (u2_ctx->is_rw) {
-			rc = spdk_nvme_ns_cmd_read (u2_ctx->ns, u2_ctx->buf[n], offset_in_ios * io_size_blocks,
+			rc = spdk_nvme_ns_cmd_read (u2_ctx->ns, u2_ctx->buf[i], offset_in_ios * io_size_blocks,
 					io_size_blocks, u2_io_complete, u2_ctx, 0);
 		} else {
-			rc = spdk_nvme_ns_cmd_write(u2_ctx->ns, u2_ctx->buf[n], offset_in_ios * io_size_blocks,
+			rc = spdk_nvme_ns_cmd_write(u2_ctx->ns, u2_ctx->buf[i], offset_in_ios * io_size_blocks,
 					io_size_blocks, u2_io_complete, u2_ctx, 0);
 		}
 
 		if (rc) {
-			fprintf(stderr, "failed to submit I/O request!\n");
+			fprintf(stderr, "failed to submit request %d!\n", i);
 			return rc;
 		}
 	}
 
-	cpl = 0;
-	while (1) {
-		if ((n = spdk_nvme_ctrlr_process_io_completions(u2_ctx->ctrlr, 0)) > 0) {
-			if ((cpl += n) == u2_ctx->queue_depth) {
-				break;
-			}
-		}
+	while (u2_ctx->io_completed != u2_ctx->queue_depth - 1) {
+		spdk_nvme_ctrlr_process_io_completions(u2_ctx->ctrlr, 0);
 	}
+
+	u2_ctx->tsc_end = rte_get_timer_cycles();
 
 	spdk_nvme_unregister_io_thread();
 
@@ -339,10 +326,9 @@ u2_perf_test()
 	io_per_sec = (float)u2_ctx->io_completed * 1000 * 1000 / elapsed_time;
 	mb_per_sec = io_per_sec * u2_ctx->io_size / (1024 * 1024);
 
-	printf("I/O size: %d, queue depth: %d\n", u2_ctx->io_size, u2_ctx->queue_depth);
-	printf("RW mode: %s %s\n", u2_cfg->is_random ? "random" : "sequential", u2_cfg->is_rw ? "read" : "write");
-	printf("elapsed time: %d us\n", elapsed_time);
-	printf("IO: %.2f IO/s, Bandwidth: %.2f MB/s\n", io_per_sec, mb_per_sec);
+	printf("u2 benchmarking results:\n");
+	printf("\telapsed time: %d us\n", elapsed_time);
+	printf("\tIO: %.2f IO/s, Bandwidth: %.2f MB/s\n", io_per_sec, mb_per_sec);
 
 	return 0;
 }
