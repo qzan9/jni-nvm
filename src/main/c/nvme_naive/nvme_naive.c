@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <unistd.h>
 
 #include <rte_config.h>
@@ -34,7 +35,6 @@
 #define U2_SIZE_1MB			(1048576)
 #define U2_SIZE_2MB			(2097152)
 #define U2_SIZE_4MB			(4194304)
-
 #define U2_SIZE_MAX			(U2_SIZE_4MB)
 
 #define U2_SLAB_SIZE			(U2_SIZE_1MB)
@@ -49,7 +49,7 @@ static struct spdk_nvme_ns *u2_ns;
 static uint32_t u2_ns_sector;
 static uint64_t u2_ns_size;
 
-static char *ealargs[] = { "nvme_simple", "-c 0x1", "-n 4", };
+static char *ealargs[] = { "nvme_naive", "-c 0x1", "-n 4", };
 
 static int
 u2_lat_bmk(int payload_size, int bmk_iter)
@@ -59,7 +59,6 @@ u2_lat_bmk(int payload_size, int bmk_iter)
 	uint32_t io_size_blocks;
 	uint64_t offset_in_ios, size_in_ios;
 	void *wr_buf, *rd_buf;
-	//void **wr_buf, **rd_buf;
 
 	uint64_t tsc_rate, tsc_start;
 	uint64_t wr_lat, rd_lat;
@@ -72,29 +71,6 @@ u2_lat_bmk(int payload_size, int bmk_iter)
 	io_size_blocks = io_size / u2_ns_sector;
 	offset_in_ios = 0;
 	size_in_ios = u2_ns_size / io_size;
-
-	//wr_buf = malloc(queue_depth * sizeof(void *));
-	//if (wr_buf == NULL) {
-	//	fprintf(stderr, "failed to malloc write buffer array!\n");
-	//	return 1;
-	//}
-	//rd_buf = malloc(queue_depth * sizeof(void *));
-	//if (rd_buf == NULL) {
-	//	fprintf(stderr, "failed to malloc read buffer array!\n");
-	//	return 1;
-	//}
-	//for (i = 0; i < queue_depth; i++) {
-	//	wr_buf[i] = rte_malloc(NULL, io_size, U2_BUFFER_ALIGN);
-	//	if (wr_buf[i] == NULL) {
-	//		fprintf(stderr, "failed to rte_malloc write buffer element!\n");
-	//		return 1;
-	//	}
-	//	rd_buf[i] = rte_malloc(NULL, io_size, U2_BUFFER_ALIGN);
-	//	if (rd_buf[i] == NULL) {
-	//		fprintf(stderr, "failed to rte_malloc read buffer element!\n");
-	//		return 1;
-	//	}
-	//}
 
 	tsc_rate = rte_get_tsc_hz();
 	wr_lat = 0;
@@ -111,6 +87,7 @@ u2_lat_bmk(int payload_size, int bmk_iter)
 			fprintf(stderr, "failed to rte_malloc write buffer %d!\n", i);
 			return 1;
 		}
+
 		tsc_start = rte_get_timer_cycles();
 		if (rc = spdk_nvme_ns_cmd_write(u2_ns, wr_buf, offset_in_ios * io_size_blocks, io_size_blocks, NULL, NULL, 0)) {
 			fprintf(stderr, "failed to submit write request %d, error %d!\n", i, rc);
@@ -118,6 +95,7 @@ u2_lat_bmk(int payload_size, int bmk_iter)
 		}
 		while (spdk_nvme_ctrlr_process_io_completions(u2_ctrlr, 0) != 1);
 		wr_lat += rte_get_timer_cycles() - tsc_start;
+
 		rte_free(wr_buf);
 
 		rd_buf = rte_malloc(NULL, io_size, U2_BUFFER_ALIGN);
@@ -125,6 +103,7 @@ u2_lat_bmk(int payload_size, int bmk_iter)
 			fprintf(stderr, "failed to rte_malloc read buffer %d!\n", i);
 			return 1;
 		}
+
 		tsc_start = rte_get_timer_cycles();
 		if (rc = spdk_nvme_ns_cmd_read(u2_ns, rd_buf, offset_in_ios * io_size_blocks, io_size_blocks, NULL, NULL, 0)) {
 			fprintf(stderr, "failed to submit read request %d, error %d!\n", i, rc);
@@ -141,13 +120,6 @@ u2_lat_bmk(int payload_size, int bmk_iter)
 	}
 
 	spdk_nvme_unregister_io_thread();
-
-	//for (i = 0; i < queue_depth; i++) {
-	//	rte_free(wr_buf[i]);
-	//	rte_free(rd_buf[i]);
-	//}
-	//free(wr_buf);
-	//free(rd_buf);
 
 	printf("write latency: %5.1f us\n", (float) (wr_lat * 1000000) / (queue_depth * tsc_rate));
 	printf("read latency:  %5.1f us\n", (float) (rd_lat * 1000000) / (queue_depth * tsc_rate));
@@ -183,16 +155,20 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 
 int main(int argc, char *argv[])
 {
-	int io_size_bytes, bmk_iter;
+	int io_size_bytes, bmk_iter, max_io_size_bytes;
 	int op;
 
 	io_size_bytes = U2_SIZE_512B;
 	bmk_iter = U2_QUEUE_DEPTH;
+	max_io_size_bytes = U2_SIZE_MAX;
 
-	while ((op = getopt(argc, argv, "q:")) != -1) {
+	while ((op = getopt(argc, argv, "q:m:")) != -1) {
 		switch (op) {
 		case 'q':
 			bmk_iter = atoi(optarg);
+			break;
+		case 'm':
+			max_io_size_bytes = atoi(optarg);
 			break;
 		default:
 			printf("%s -q [queue depth]\n", argv[0]);
@@ -228,7 +204,7 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-		if ((io_size_bytes *= 2) > U2_SIZE_MAX) {
+		if ((io_size_bytes *= 2) > max_io_size_bytes) {
 			break;
 		}
 	}
