@@ -118,21 +118,22 @@ parse_args(int argc, char **argv)
 		u2_cfg->queue_depth = U2_QUEUE_DEPTH;
 	}
 
-	if (!strcmp(workload, "read")) {
-		u2_cfg->is_random = U2_SEQUENTIAL;
-		u2_cfg->is_rw     = U2_READ;
-	} else if (!strcmp(workload, "write")) {
-		u2_cfg->is_random = U2_SEQUENTIAL;
-		u2_cfg->is_rw     = U2_WRITE;
-	} else if (!strcmp(workload, "randread")) {
-		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw     = U2_READ;
-	} else if (!strcmp(workload, "randwrite")) {
-		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw     = U2_WRITE;
-	} else {
-		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw     = U2_READ;
+	u2_cfg->is_random = U2_RANDOM;
+	u2_cfg->is_rw = U2_READ;
+	if (workload) {
+		if (!strcmp(workload, "read")) {
+			u2_cfg->is_random = U2_SEQUENTIAL;
+			u2_cfg->is_rw     = U2_READ;
+		} else if (!strcmp(workload, "write")) {
+			u2_cfg->is_random = U2_SEQUENTIAL;
+			u2_cfg->is_rw     = U2_WRITE;
+		} else if (!strcmp(workload, "randread")) {
+			u2_cfg->is_random = U2_RANDOM;
+			u2_cfg->is_rw     = U2_READ;
+		} else if (!strcmp(workload, "randwrite")) {
+			u2_cfg->is_random = U2_RANDOM;
+			u2_cfg->is_rw     = U2_WRITE;
+		}
 	}
 
 	return 0;
