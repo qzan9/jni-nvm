@@ -738,7 +738,7 @@ parse_args(int argc, char **argv)
 	g_max_completions = 0;
 	g_core_mask       = NULL;
 
-	while ((op = getopt(argc, argv, "q:s:w:t:M:m:c")) != -1) {
+	while ((op = getopt(argc, argv, "q:s:w:t:M:m:c:")) != -1) {
 		switch (op) {
 		case 'q':
 			g_queue_depth = atoi(optarg);

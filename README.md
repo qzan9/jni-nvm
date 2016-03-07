@@ -4,9 +4,9 @@ user-level NVM access for Java: take full advantage of the potential performance
 
 ## HowTo Build
 
-* follow `doc/spdk-gsg.md` to prepare SPDK/DPDK environment.
+* follow `doc/spdk-gsg.md` to prepare SPDK/DPDK build environment.
 
 * specify `DPDK_DIR` and `SPDK_DIR` and `JAVA_HOME` in `mk/common.mk`.
 
-* `make` and `mvn package`.
+* then just `make` or `mvn package`.
 

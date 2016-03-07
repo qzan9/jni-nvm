@@ -118,11 +118,7 @@ parse_args(int argc, char **argv)
 		u2_cfg->queue_depth = U2_QUEUE_DEPTH;
 	}
 
-	if (!workload || strcmp(workload, "read")     && strcmp(workload, "write")   &&
-	                 strcmp(workload, "randread") && strcmp(workload, "randwrite")) {
-		u2_cfg->is_random = U2_RANDOM;
-		u2_cfg->is_rw     = U2_READ;
-	} else if (!strcmp(workload, "read")) {
+	if (!strcmp(workload, "read")) {
 		u2_cfg->is_random = U2_SEQUENTIAL;
 		u2_cfg->is_rw     = U2_READ;
 	} else if (!strcmp(workload, "write")) {
@@ -134,6 +130,9 @@ parse_args(int argc, char **argv)
 	} else if (!strcmp(workload, "randwrite")) {
 		u2_cfg->is_random = U2_RANDOM;
 		u2_cfg->is_rw     = U2_WRITE;
+	} else {
+		u2_cfg->is_random = U2_RANDOM;
+		u2_cfg->is_rw     = U2_READ;
 	}
 
 	return 0;
@@ -145,25 +144,24 @@ probe_cb(void *cb_ctx, struct spdk_pci_device *dev)
 	/* just attach to the firstly probed NVMe device. */
 	if (u2_ctx->ctrlr) {
 		return false;
-	} else {
-		if (spdk_pci_device_has_non_uio_driver(dev)) {
-			fprintf(stderr, "non-uio/kernel driver attached to NVMe!\n");
-			fprintf(stderr, "  controller at PCI address %04x:%02x:%02x.%02x\n",
-					spdk_pci_device_get_domain(dev),
-					spdk_pci_device_get_bus(dev),
-					spdk_pci_device_get_dev(dev),
-					spdk_pci_device_get_func(dev));
-			fprintf(stderr, "  skipping...\n");
-			return false;
-		}
-		else {
-			printf("attaching to %04x:%02x:%02x.%02x ... ",
+	}
+
+	if (spdk_pci_device_has_non_uio_driver(dev)) {
+		fprintf(stderr, "non-uio/kernel driver attached to NVMe!\n");
+		fprintf(stderr, "  controller at PCI address %04x:%02x:%02x.%02x\n",
 				spdk_pci_device_get_domain(dev),
 				spdk_pci_device_get_bus(dev),
 				spdk_pci_device_get_dev(dev),
 				spdk_pci_device_get_func(dev));
-			return true;
-		}
+		fprintf(stderr, "  skipping...\n");
+		return false;
+	} else {
+		printf("attaching to %04x:%02x:%02x.%02x ... ",
+			spdk_pci_device_get_domain(dev),
+			spdk_pci_device_get_bus(dev),
+			spdk_pci_device_get_dev(dev),
+			spdk_pci_device_get_func(dev));
+		return true;
 	}
 }
 
