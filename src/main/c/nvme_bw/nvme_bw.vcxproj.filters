@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="nvme_simple.c">
+    <ClCompile Include="nvme_bw.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

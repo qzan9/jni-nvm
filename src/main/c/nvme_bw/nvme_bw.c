@@ -1,7 +1,7 @@
 /*
- * nvme_simple/u2_simple
+ * nvme_bw/u2_bw
  *
- *   pick the first namespace of the first probed NVMe device and do some simple test.
+ *   pick the first namespace of the first probed NVMe device and do some no-brain benchmark.
  *
  *   RESTRICTED to just ONE thread and ONE namespace.
  */
@@ -76,7 +76,7 @@ static struct u2_context *u2_ctx;
 
 static __thread unsigned int seed = 0;
 
-static char *ealargs[] = { "nvme_simple", "-c 0x1", "-n 4", };
+static char *ealargs[] = { "nvme_bw", "-c 0x1", "-n 4", };
 
 static int
 parse_args(int argc, char **argv)
@@ -197,9 +197,9 @@ u2_init(void)
 		return rc;
 	}
 
-	printf("\n=======================================\n");
-	printf(  "  NVMe/U2 simple - ict.ncic.syssw.ufo"    );
-	printf("\n=======================================\n");
+	printf("\n===================================\n");
+	printf(  "  NVMe/U2 bw - ict.ncic.syssw.ufo"    );
+	printf("\n===================================\n");
 
 	/* allocate memory pools for NVMe requests. */
 	request_mempool = rte_mempool_create("nvme_request",

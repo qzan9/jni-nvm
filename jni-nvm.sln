@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.24720.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nvme_simple", "src\main\c\nvme_simple\nvme_simple.vcxproj", "{CC45A1A8-8359-4B67-BFC8-E88233D9E56A}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nvme_bw", "src\main\c\nvme_bw\nvme_bw.vcxproj", "{CC45A1A8-8359-4B67-BFC8-E88233D9E56A}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nvme_naive", "src\main\c\nvme_naive\nvme_naive.vcxproj", "{78580DFF-77E4-40C4-822D-06C1E3335F9E}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nvme_lat", "src\main\c\nvme_lat\nvme_lat.vcxproj", "{78580DFF-77E4-40C4-822D-06C1E3335F9E}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dpdk_memtest", "src\main\c\dpdk_memtest\dpdk_memtest.vcxproj", "{6EB18326-B90C-479E-95DB-31E915BCAD97}"
 EndProject

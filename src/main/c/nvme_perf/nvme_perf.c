@@ -1,5 +1,5 @@
 /*
- * nvme_perftest
+ * nvme_perf/u2_perf
  *
  *   do same I/O perftest to all of the NVMe namespaces attached to the system.
  */
@@ -90,7 +90,7 @@ static uint64_t    g_tsc_rate;
 
 static __thread unsigned int seed = 0;
 
-static char *ealargs[] = { "nvme_perftest", "-c 0x1", "-n 4", };    // DPDK initialization parameters.
+static char *ealargs[] = { "nvme_perf", "-c 0x1", "-n 4", };    // DPDK initialization parameters.
 
 /*
  * "thd" submits requests to and handles completions from "ns" through "ctx": thd -> ctx -> ns.
@@ -184,9 +184,9 @@ int main(int argc, char **argv)
 	}
 	free(ealargs[1]);
 
-	printf("\n======================================\n");
-	printf(  "  NVMe PerfTest - ict.ncic.syssw.ufo"    );
-	printf("\n======================================\n");
+	printf("\n=========================================\n");
+	printf(  "  NVMe/U2 PerfTest - ict.ncic.syssw.ufo"    );
+	printf("\n=========================================\n");
 
 	/* reserve a pool of nvme_requests. */
 	request_mempool = rte_mempool_create("nvme_request",

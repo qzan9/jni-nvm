@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="nvme_naive.c">
+    <ClCompile Include="nvme_lat.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

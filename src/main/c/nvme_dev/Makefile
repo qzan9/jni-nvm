@@ -1,7 +1,7 @@
 # project files
-PROJECT  := nvme_perftest
+PROJECT  := nvme_dev
 
-CFILES   := nvme_perftest.c
+CFILES   := $(PROJECT).c
 DEPFILES :=
 
 spdk     := 1

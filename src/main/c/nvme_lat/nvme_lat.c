@@ -1,5 +1,5 @@
 /*
- * nvme_naive/u2_naive
+ * nvme_lat/u2_lat
  *
  *   even simpler NVMe access demonstration.
  */
@@ -49,7 +49,7 @@ static struct spdk_nvme_ns *u2_ns;
 static uint32_t u2_ns_sector;
 static uint64_t u2_ns_size;
 
-static char *ealargs[] = { "nvme_naive", "-c 0x1", "-n 4", };
+static char *ealargs[] = { "nvme_lat", "-c 0x1", "-n 4", };
 
 static int
 u2_lat_bmk(int payload_size, int bmk_iter)
@@ -180,6 +180,10 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "failed to initialize DPDK EAL!\n");
 		return 1;
 	}
+
+	printf("\n====================================\n");
+	printf(  "  NVMe/U2 lat - ict.ncic.syssw.ufo"    );
+	printf("\n====================================\n");
 
 	request_mempool = rte_mempool_create("nvme_request",
 				U2_REQUEST_POOL_SIZE, spdk_nvme_request_size(),

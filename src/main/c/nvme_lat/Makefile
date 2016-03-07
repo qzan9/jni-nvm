@@ -1,5 +1,5 @@
 # project files
-PROJECT  := nvme_naive
+PROJECT  := nvme_lat
 
 CFILES   := $(PROJECT).c
 DEPFILES :=

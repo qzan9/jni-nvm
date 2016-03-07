@@ -1,5 +1,5 @@
 /*
- * nvme_devinfo
+ * nvme_dev/u2_dev
  *
  * display basic information of all the NVMe devices currently attached.
  *
@@ -266,7 +266,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *pci_dev, struct spdk_nvme_ctrlr 
 	spdk_nvme_detach(ctrlr);
 }
 
-static char *ealargs[] = { "nvme_devinfo", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
+static char *ealargs[] = { "nvme_dev", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
 
 int main(int argc, char **argv)
 {
@@ -286,6 +286,10 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
+	printf("\n=====================================\n");
+	printf(  "  NVMe/U2 Info - ict.ncic.syssw.ufo"    );
+	printf("\n=====================================\n");
+
 	/*
 	 * allocate a physically continuous chunk of memory for NVMe requests.
 	 *
@@ -303,10 +307,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "failed to initialize request mempool!\n");
 		return 1;
 	}
-
-	printf("\n==================================\n");
-	printf(  "  NVMe Info - ict.ncic.syssw.ufo"    );
-	printf("\n==================================\n");
 
 	/*
 	 * enumerate NVMe devices and attach them to userspace.

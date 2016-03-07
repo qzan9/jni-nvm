@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{CC45A1A8-8359-4B67-BFC8-E88233D9E56A}</ProjectGuid>
+    <ProjectGuid>{78580DFF-77E4-40C4-822D-06C1E3335F9E}</ProjectGuid>
     <RootNamespace>jninvm</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
   </PropertyGroup>
@@ -137,7 +137,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="nvme_simple.c" />
+    <ClCompile Include="nvme_lat.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
