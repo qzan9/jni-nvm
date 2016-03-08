@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{78580DFF-77E4-40C4-822D-06C1E3335F9E}</ProjectGuid>
+    <ProjectGuid>{F957D80E-2451-4E1B-85BD-3E2B814236A4}</ProjectGuid>
     <RootNamespace>jninvm</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
   </PropertyGroup>
