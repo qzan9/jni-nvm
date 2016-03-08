@@ -73,6 +73,14 @@ download SPDK and DPDK source codes
 
 **NOTE** that this bug has been fixed for newer version of CentOS (6.7) and DPDK (2.2.0).
 
+if compiling with a newer kernel, such as `3.10.x`, the old gcc of CentOS 6.x may complain
+
+    /usr/src/kernels/3.10.99-1.el6.elrepo.x86_64/include/linux/slab.h:517: error: inlining failed in call to ‘kzalloc.clone.0’: --param max-inline-insns-single limit reached
+
+one stupid fix would be increasing `max-inline-insns-single` to a larger size and edit `$(DPDK_DIR)/lib/librte_eal/linuxapp/igb_uio/Makefile`
+
+    MODULE_CFLAGS += -I$(SRCDIR) --param max-inline-insns-single=1000
+
 ## Build DPDK and SPDK ##
 
 first build DPDK
@@ -223,7 +231,9 @@ DPDK release 1.7 onward provides VFIO support, and `vfio-pci` module must be loa
 
     $ sudo modprobe vfio-pci
 
-Note that in order to use IOMMU, your kernel must support it, which means that kernel configurations of `IOMMU_SUPPORT`, `IOMMU_API` and `INTEL_IOMMU` must be set. VFIO kernel modules have been included in the Linux kernel since version 3.6.0. also, both kernel and BIOS must support and be configured to use I/O virtualization (such as Intel VT-d). when using `igb_uio` driver, the `iommu=pt` kernel parameter must be used, which results in passthrough of DMA-remapping lookup in the host. the `vfio-pci` driver can actually work with both `iommu=pt` and `iommu=on`.
+note that in order to use IOMMU, your kernel must support it, which means that kernel configurations of `IOMMU_SUPPORT`, `IOMMU_API` and `INTEL_IOMMU` must be set. VFIO kernel modules have been included in the Linux kernel since version 3.6.0. also, both kernel and BIOS must support and be configured to use I/O virtualization (such as Intel VT-d). when using `igb_uio` driver, the `iommu=pt`/`intel_iommu=pt` kernel parameter must be used, which results in passthrough of DMA-remapping lookup in the host. the `vfio-pci` driver can actually work with both `iommu=pt` and `iommu=on`/`intel_iommu=on`.
+
+note note that `iommu=pt` disables DMAR in Linux kernel, but KVM still runs on VT-d and interrupt remapping still works. this is useful if you don't want to enable VT-d DMAR in kernel but still want to use KVM and interrupt remapping for reasons like DMAR performance concern of debug purpose.
 
 to bind to VFIO/UIO, NVMe devices must be first unbound from NVMe kernel driver, to do so, unload the whole driver
 
