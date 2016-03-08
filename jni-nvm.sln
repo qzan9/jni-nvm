@@ -11,6 +11,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dpdk_memtest", "src\main\c\
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nvme_lat_k", "src\main\c\nvme_lat_k\nvme_lat_k.vcxproj", "{F957D80E-2451-4E1B-85BD-3E2B814236A4}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nvme_dev", "src\main\c\nvme_dev\nvme_dev.vcxproj", "{CD327B58-DE47-42F0-82F2-ABAA58AE887B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -51,6 +53,14 @@ Global
 		{F957D80E-2451-4E1B-85BD-3E2B814236A4}.Release|x64.Build.0 = Release|x64
 		{F957D80E-2451-4E1B-85BD-3E2B814236A4}.Release|x86.ActiveCfg = Release|Win32
 		{F957D80E-2451-4E1B-85BD-3E2B814236A4}.Release|x86.Build.0 = Release|Win32
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Debug|x64.ActiveCfg = Debug|x64
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Debug|x64.Build.0 = Debug|x64
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Debug|x86.ActiveCfg = Debug|Win32
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Debug|x86.Build.0 = Debug|Win32
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Release|x64.ActiveCfg = Release|x64
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Release|x64.Build.0 = Release|x64
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Release|x86.ActiveCfg = Release|Win32
+		{CD327B58-DE47-42F0-82F2-ABAA58AE887B}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
