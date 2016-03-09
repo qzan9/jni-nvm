@@ -4,11 +4,22 @@
  *   simpler latency benchmark through /dev/nvme0n1.
  */
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
+#include <fcntl.h>
 #include <unistd.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+
+#include <linux/fs.h>
 
 #include <rte_config.h>
 #include <rte_malloc.h>
@@ -17,12 +28,7 @@
 
 #include <spdk/nvme.h>
 
-#define U2_REQUEST_POOL_SIZE		(65536)
-#define U2_REQUEST_CACHE_SIZE		(0)
-#define U2_REQUEST_PRIVATE_SIZE		(0)
-
-#define U2_NAMESPACE_ID			(1)
-#define U2_QUEUE_DEPTH			(512)
+#define U2_QUEUE_DEPTH			(1024)
 
 #define U2_SIZE_512B			(512)
 #define U2_SIZE_1KB			(1024)
@@ -39,31 +45,75 @@
 
 #define U2_SLAB_SIZE			(U2_SIZE_1MB)
 
-#define U2_BUFFER_ALIGN			(0x200)
+#define U2_RANDOM			(1)
+#define U2_SEQUENTIAL			(0)
 
 #define u2_mmap(_s)			_u2_mmap((size_t)(_s), __FILE__, __LINE__)
 #define u2_munmap(_p, _s)		_u2_munmap(_p, (size_t)(_s), __FILE__, __LINE__)
 
-
-//struct rte_mempool *request_mempool;
-
-//static struct spdk_nvme_ctrlr *u2_ctrlr;
-//static struct spdk_nvme_ns *u2_ns;
-
 static const char *nvme_device = "/dev/nvme0n1";
-static int fd;
+static int fd = -1;
+static uint64_t ns_size = 800000000000;
 
-static uint64_t ns_size;
+static uint32_t io_size;
+static uint32_t queue_depth;
 
-static uint8_t *rd_buf;
-static uint8_t *wr_buf;
+static int is_random;
+static char *core_mask;
 
-//static uint32_t u2_ns_sector;
-//static uint64_t u2_ns_size;
+static unsigned int seed = 0;
 
 static char *ealargs[] = { "nvme_lat_k", "-c 0x1", "-n 4", };
 
-static int 
+static int
+parse_args(int argc, char **argv)
+{
+	int op;
+	char *mode;
+
+	io_size = U2_SIZE_512B;
+
+	while ((op = getopt(argc, argv, "q:m:c:")) != -1) {
+		switch (op) {
+		case 'q':
+			queue_depth = atoi(optarg);
+			break;
+		case 'm':
+			mode = optarg;
+			break;
+		case 'c':
+			core_mask = optarg;
+			break;
+		default:
+			printf("%s -q [queue depth] -m [R/W mode (rand, seq)] -c [core mask]\n", argv[0]);
+			return 1;
+		}
+	}
+
+	if (!queue_depth) {
+		queue_depth = U2_QUEUE_DEPTH;
+	}
+
+	is_random = U2_RANDOM;
+	if (mode) {
+		if (!strcmp(mode, "seq")) {
+			is_random = U2_SEQUENTIAL;
+		}
+	}
+
+	if (core_mask) {
+		ealargs[1] = malloc(sizeof("-c ") + strlen(core_mask));
+		if (ealargs[1] == NULL) {
+			fprintf(stderr, "failed to malloc ealargs[1]!\n");
+			return 1;
+		}
+		sprintf(ealargs[1], "-c %s", core_mask);
+	}
+
+	return 0;
+}
+
+/*static int
 u2_device_size(const char *path, size_t *size)
 {
 	int status;
@@ -102,14 +152,14 @@ u2_device_size(const char *path, size_t *size)
 	close(fd);
 
 	return 0;
-}
+}*/
 
-static void
+static void *
 _u2_mmap(size_t size, const char *name, int line)
 {
 	void *p;
 
-	ASSERT(size != 0);
+	assert(size != 0);
 
 	p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (p == ((void *)-1)) {
@@ -125,8 +175,8 @@ _u2_munmap(void *p, size_t size, const char *name, int line)
 {
 	int status;
 
-	ASSERT(p != NULL);
-	ASSERT(size != 0);
+	assert(p != NULL);
+	assert(size != 0);
 
 	status = munmap(p, size);
 	if (status < 0) {
@@ -138,43 +188,44 @@ _u2_munmap(void *p, size_t size, const char *name, int line)
 
 
 static int
-u2_lat_bmk_k(int payload_size, int bmk_iter)
+u2_lat_bmk_k(void)
 {
-	uint32_t io_size, queue_depth;
-	uint64_t offset;
+	uint64_t offset, size_in_ios;
+	uint8_t *wr_buf, *rd_buf;
 
 	uint64_t tsc_rate, tsc_start;
 	uint64_t wr_lat, rd_lat;
 
-	int i, rc;
+	int i;
 
-	io_size = payload_size;
-	queue_depth = bmk_iter;
-
-	offset = 0;
-	ns_size = u2_device_size(nvme_device, &ns_size);
+	offset = 0 - io_size;
+	size_in_ios = ns_size / io_size;
 
 	tsc_rate = rte_get_tsc_hz();
 	wr_lat = 0;
 	rd_lat = 0;
 
-	//if (spdk_nvme_register_io_thread()) {
-	//	fprintf(stderr, "failed to register thread!\n");
-	//	return 1;
-	//}
-
-	fd = open(nvme_device, O_RDWR | O_ODIRECT, 0644);
+	fd = open(nvme_device, O_RDWR | O_DIRECT, 0644);
 	if (fd < 0) {
 		fprintf(stderr, "failed to open '%s'!\n", nvme_device);
 		return 1;
 	}
 
-	for (i = 0; i < queue_depth; i++) {
+	/*for (i = 0; i < queue_depth; i++) {
+		if (is_random) {
+			offset = io_size * (rand_r(&seed) % size_in_ios);
+		} else {
+			if ((offset += io_size) > ns_size - io_size) {
+				offset = 0;
+			}
+		}
+
 		wr_buf = u2_mmap(io_size);
 		if (wr_buf == NULL) {
 			fprintf(stderr, "failed to mmap write buffer!\n");
 			return 1;
 		}
+		memset(wr_buf, 0xff, io_size);
 
 		tsc_start = rte_get_timer_cycles();
 		if (pwrite(fd, wr_buf, io_size, offset) < io_size) {
@@ -190,6 +241,7 @@ u2_lat_bmk_k(int payload_size, int bmk_iter)
 			fprintf(stderr, "failed to mmap read buffer!\n");
 			return 1;
 		}
+		memset(rd_buf, 0xff, io_size);
 
 		tsc_start = rte_get_timer_cycles();
 		if (pread(fd, rd_buf, io_size, offset) < io_size) {
@@ -199,67 +251,74 @@ u2_lat_bmk_k(int payload_size, int bmk_iter)
 		rd_lat += rte_get_timer_cycles() - tsc_start;
 
 		u2_munmap(rd_buf, io_size);
+	}*/
 
-		if ((offset += io_size) == ns_size) {
-			offset = 0;
+	for (i = 0; i < queue_depth; i++) {
+		if (is_random) {
+			offset = io_size * (rand_r(&seed) % size_in_ios);
+		} else {
+			if ((offset += io_size) > ns_size - io_size) {
+				offset = 0;
+			}
 		}
+
+		wr_buf = u2_mmap(io_size);
+		if (wr_buf == NULL) {
+			fprintf(stderr, "failed to mmap write buffer!\n");
+			return 1;
+		}
+		memset(wr_buf, 0xff, io_size);
+
+		tsc_start = rte_get_timer_cycles();
+		if (pwrite(fd, wr_buf, io_size, offset) < io_size) {
+			fprintf(stderr, "failed to pwrite: %d!\n", i);
+			return 1;
+		}
+		wr_lat += rte_get_timer_cycles() - tsc_start;
+
+		u2_munmap(wr_buf, io_size);
 	}
 
-	//spdk_nvme_unregister_io_thread();
+	printf("\t\t%9.1f us", (float) (wr_lat * 1000000) / (queue_depth * tsc_rate));
 
-	printf("write latency: %5.1f us\n", (float) (wr_lat * 1000000) / (queue_depth * tsc_rate));
-	printf("read latency:  %5.1f us\n", (float) (rd_lat * 1000000) / (queue_depth * tsc_rate));
+	for (i = 0; i < queue_depth; i++) {
+		if (is_random) {
+			offset = io_size * (rand_r(&seed) % size_in_ios);
+		} else {
+			if ((offset += io_size) > ns_size - io_size) {
+				offset = 0;
+			}
+		}
+
+		rd_buf = u2_mmap(io_size);
+		if (rd_buf == NULL) {
+			fprintf(stderr, "failed to mmap read buffer!\n");
+			return 1;
+		}
+		memset(rd_buf, 0xff, io_size);
+
+		tsc_start = rte_get_timer_cycles();
+		if (pread(fd, rd_buf, io_size, offset) < io_size) {
+			fprintf(stderr, "failed to pread: %d!\n", i);
+			return 1;
+		}
+		rd_lat += rte_get_timer_cycles() - tsc_start;
+
+		u2_munmap(rd_buf, io_size);
+	}
+
+	printf("\t\t%9.1f us", (float)(rd_lat * 1000000) / (queue_depth * tsc_rate));
+
+	printf("\n");
 
 	return 0;
 }
 
-//static bool
-//probe_cb(void *cb_ctx, struct spdk_pci_device *dev)
-//{
-//	if (u2_ctrlr) {
-//		return false;
-//	}
-//
-//	if (spdk_pci_device_has_non_uio_driver(dev)) {
-//		fprintf(stderr, "non-UIO/kernel driver detected!\n");
-//		return false;
-//	}
-//
-//	return true;
-//}
-
-//static void
-//attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctrlr)
-//{
-//	u2_ctrlr = ctrlr;
-//	u2_ns = spdk_nvme_ctrlr_get_ns(u2_ctrlr, U2_NAMESPACE_ID);
-//	u2_ns_sector = spdk_nvme_ns_get_sector_size(u2_ns);
-//	u2_ns_size = spdk_nvme_ns_get_size(u2_ns);
-//
-//	printf("attached to NVMe SSD!\n");
-//}
-
 int main(int argc, char *argv[])
 {
-	int io_size_bytes, bmk_iter, max_io_size_bytes;
-	int op;
-
-	io_size_bytes = U2_SIZE_512B;
-	bmk_iter = U2_QUEUE_DEPTH;
-	max_io_size_bytes = U2_SIZE_MAX;
-
-	while ((op = getopt(argc, argv, "q:m:")) != -1) {
-		switch (op) {
-		case 'q':
-			bmk_iter = atoi(optarg);
-			break;
-		case 'm':
-			max_io_size_bytes = atoi(optarg);
-			break;
-		default:
-			printf("%s -q [queue depth] -m [max I/O size]\n", argv[0]);
-			return 1;
-		}
+	if (parse_args(argc, argv)) {
+		fprintf(stderr, "failed to parse arguments!\n");
+		return 1;
 	}
 
 	if (rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]), ealargs) < 0) {
@@ -268,38 +327,27 @@ int main(int argc, char *argv[])
 	}
 
 	printf("\n===========================================\n");
-	printf(  "  NVMe/U2 lat kernel - ict.ncic.syssw.ufo"    );
+	printf(  "  NVMe/U2 LAT kernel - ict.ncic.syssw.ufo"    );
 	printf("\n===========================================\n");
 
-	//request_mempool = rte_mempool_create("nvme_request",
-	//			U2_REQUEST_POOL_SIZE, spdk_nvme_request_size(),
-	//			U2_REQUEST_CACHE_SIZE, U2_REQUEST_PRIVATE_SIZE,
-	//			NULL, NULL, NULL, NULL,
-	//			SOCKET_ID_ANY, 0);
-	//if (request_mempool == NULL) {
-	//	fprintf(stderr, "failed to create request pool!\n");
-	//	return 1;
-	//}
-
-	//if (spdk_nvme_probe(NULL, probe_cb, attach_cb)) {
-	//	fprintf(stderr, "failed to probe and attach to NVMe device!\n");
-	//	return 1;
-	//}
-
+	printf("u2 latency benchmarking ... queue depth: %d, mode: %s\n", queue_depth, is_random ? "random" : "sequential");
+	printf("\t%8s\t\t%12s\t\t%12s\n", "I/O size", "write lat", "read lat");
 	while (1) {
-		printf("u2 latency benchmarking - IO size %d ...\n", io_size_bytes);
+		printf("\t%8d", io_size);
 
-		if (u2_lat_bmk_k(io_size_bytes, bmk_iter)) {
-			fprintf(stderr, "failed to benchmark latency - IO size %d!\n", io_size_bytes);
+		if (u2_lat_bmk_k()) {
+			fprintf(stderr, "failed to benchmark latency - IO size %d!\n", io_size);
 			return 1;
 		}
 
-		if ((io_size_bytes *= 2) > max_io_size_bytes) {
+		if ((io_size *= 2) > U2_SIZE_MAX) {
 			break;
 		}
 	}
 
-	//spdk_nvme_detach(u2_ctrlr);
+	if (core_mask) {
+		free(ealargs[1]);
+	}
 
 	return 0;
 }
