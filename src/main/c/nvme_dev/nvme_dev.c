@@ -41,6 +41,8 @@ static struct spdk_nvme_health_information_page *health_page;
 
 static int outstanding_commands;
 
+static char *ealargs[] = { "nvme_dev", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
+
 static void
 print_uint128_hex(uint64_t *v)
 {
@@ -57,7 +59,6 @@ print_uint128_dec(uint64_t *v)
 {
 	unsigned long long lo = v[0], hi = v[1];
 	if (hi) {
-		/* can't handle large (>64-bit) decimal values for now, so fall back to hex */
 		print_uint128_hex(v);
 	} else {
 		printf("%llu", (unsigned long long)lo);
@@ -73,31 +74,29 @@ get_feature_completion(void *cb_arg, const struct spdk_nvme_cpl *cpl)
 	if (spdk_nvme_cpl_is_error(cpl)) {
 		fprintf(stderr, "get_feature(0x%02X) failed!\n", fid);
 	} else {
-		/* record command dword 0. */
 		feature->result = cpl->cdw0;
 		feature->valid = true;
 	}
+
 	outstanding_commands--;
 }
 
 static int
 get_feature(struct spdk_nvme_ctrlr *ctrlr, uint8_t fid)
 {
-	struct spdk_nvme_cmd cmd = {};    // 16-dword/64-bytes
+	struct spdk_nvme_cmd cmd = {};
 
 	cmd.opc = SPDK_NVME_OPC_GET_FEATURES;
 	cmd.cdw10 = fid;
 
-	/* invoke the low-level interface for directly submitting admin commands to query features. */
 	return spdk_nvme_ctrlr_cmd_admin_raw(ctrlr, &cmd, NULL, 0, get_feature_completion, &features[fid]);
 }
 
 static void
 get_features(struct spdk_nvme_ctrlr *ctrlr)
 {
-	size_t i;
+	int i;
 
-	/* NVMe features are defined in nvme_spec.h. */
 	uint8_t features_to_get[] = {
 	//	SPDK_NVME_FEAT_ARBITRATION,
 	//	SPDK_NVME_FEAT_POWER_MANAGEMENT,
@@ -115,7 +114,6 @@ get_features(struct spdk_nvme_ctrlr *ctrlr)
 	}
 
 	while (outstanding_commands) {
-		/* process any unsettled completions for admin commands. */
 		spdk_nvme_ctrlr_process_admin_completions(ctrlr);
 	}
 }
@@ -126,6 +124,7 @@ get_log_page_completion(void *cb_arg, const struct spdk_nvme_cpl *cpl)
 	if (spdk_nvme_cpl_is_error(cpl)) {
 		fprintf(stderr, "get log page failed!\n");
 	}
+
 	outstanding_commands--;
 }
 
@@ -133,25 +132,20 @@ static int
 get_health_log_page(struct spdk_nvme_ctrlr *ctrlr)
 {
 	if (NULL == health_page) {
-		/* allocate zero'ed memory from the RTE heap. */
 		health_page = rte_zmalloc("nvme health", sizeof(*health_page), 4096);
 		if (NULL == health_page) {
 			fprintf(stderr, "failed to allocate health page!\n");
 			return 1;
 		}
-		/*
-		 * using malloc would cause error "could not find 2MB vfn 0xf in DPDK mem config".
-		 */
-		/*health_page = malloc(sizeof(*health_page));
-		if (NULL == health_page) {
-			perror("health_page malloc");
-			return 1;
-		}*/
+		//health_page = malloc(sizeof(*health_page));
+		//if (NULL == health_page) {
+		//	perror("health_page malloc");
+		//	return 1;
+		//}
 	}
 
-	/* get health log page from the NVMe controller. */
 	if (spdk_nvme_ctrlr_cmd_get_log_page(ctrlr, SPDK_NVME_LOG_HEALTH_INFORMATION, SPDK_NVME_GLOBAL_NS_TAG,
-	                                     health_page, sizeof(*health_page), get_log_page_completion, NULL)) {
+					health_page, sizeof(*health_page), get_log_page_completion, NULL)) {
 		fprintf(stderr, "spdk_nvme_ctrlr_cmd_get_log_page() failed!\n");
 		return 1;
 	}
@@ -266,12 +260,8 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *pci_dev, struct spdk_nvme_ctrlr 
 	spdk_nvme_detach(ctrlr);
 }
 
-static char *ealargs[] = { "nvme_dev", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
-
 int main(int argc, char **argv)
 {
-	int rc;
-
 	/*
 	 * initialize DPDK EAL: set up hugepage memory and PCI bus access, and create a thread for each core.
 	 *
@@ -279,16 +269,14 @@ int main(int argc, char **argv)
 	 *
 	 * here c: coremask and n: memory channels.
 	 */
-	rc = rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]),
-			  (char **)(void *)(uintptr_t)ealargs);
-	if (rc < 0) {
+	if (rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]), (char **)(void *)(uintptr_t)ealargs) < 0) {
 		fprintf(stderr, "failed to initialize DPDK EAL!\n");
-		return rc;
+		return 1;
 	}
 
-	printf("\n=====================================\n");
-	printf(  "  NVMe/U2 Info - ict.ncic.syssw.ufo"    );
-	printf("\n=====================================\n");
+	printf("\n====================================\n");
+	printf(  "  NVMe/U2 DEV - ict.ncic.syssw.ufo"    );
+	printf("\n====================================\n");
 
 	/*
 	 * allocate a physically continuous chunk of memory for NVMe requests.
@@ -299,10 +287,10 @@ int main(int argc, char **argv)
 	 *
 	 * NVMe requests are stored in this mempool and allocated for each I/O.
 	 */
-	request_mempool = rte_mempool_create("nvme_request", 1024,
-					     spdk_nvme_request_size(), 128, 0,
-					     NULL, NULL, NULL, NULL,
-					     SOCKET_ID_ANY, 0);
+	request_mempool = rte_mempool_create("nvme_request",
+					1024, spdk_nvme_request_size(), 0, 0,
+					NULL, NULL, NULL, NULL,
+					SOCKET_ID_ANY, 0);
 	if (request_mempool == NULL) {
 		fprintf(stderr, "failed to initialize request mempool!\n");
 		return 1;
@@ -315,10 +303,9 @@ int main(int argc, char **argv)
 	 *
 	 * attach_cb prints controller and namespace information and then detaches the controller.
 	 */
-	rc = 0;
 	if (spdk_nvme_probe(NULL, probe_cb, attach_cb) != 0) {
 		fprintf(stderr, "spdk_nvme_probe() failed!\n");
-		rc = 1;
+		return 1;
 	}
 
 	/*
@@ -329,6 +316,6 @@ int main(int argc, char **argv)
 		health_page = NULL;
 	}
 
-	return rc;
+	return 0;
 }
 
