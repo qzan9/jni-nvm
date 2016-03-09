@@ -1,7 +1,7 @@
 /*
  * nvme_bw/u2_bw
  *
- *   pick the first namespace of the first probed NVMe device and do some no-brain benchmark.
+ *   pick the first namespace of the first probed NVMe device and do some basic benchmarking.
  *
  *   RESTRICTED to just ONE thread and ONE namespace.
  */
@@ -19,7 +19,7 @@
 #include <spdk/nvme.h>
 
 #define U2_REQUEST_POOL_SIZE		(8192)
-#define U2_REQUEST_CACHE_SIZE		(128)
+#define U2_REQUEST_CACHE_SIZE		(0)
 #define U2_REQUEST_PRIVATE_SIZE		(0)
 
 #define U2_NAMESPACE_ID			(1)
@@ -42,13 +42,15 @@ struct u2_user {
 	uint32_t queue_depth;
 	int is_random;
 	int is_rw;
+	char *mode;
+	char *core_mask;
 };
 
 struct u2_context {
 //	char ctrlr_pci_id[16];
 	struct spdk_nvme_ctrlr *ctrlr;
 	char ctrlr_name[1024];
-	uint32_t ns_num;
+	uint32_t ctrlr_ns_num;
 
 	uint32_t ns_id;
 	struct spdk_nvme_ns *ns;
@@ -74,7 +76,7 @@ struct rte_mempool *request_mempool;
 static struct u2_user *u2_cfg;
 static struct u2_context *u2_ctx;
 
-static __thread unsigned int seed = 0;
+static unsigned int seed = 0;
 
 static char *ealargs[] = { "nvme_bw", "-c 0x1", "-n 4", };
 
@@ -82,7 +84,6 @@ static int
 parse_args(int argc, char **argv)
 {
 	int op;
-	const char *workload;
 
 	u2_cfg = malloc(sizeof(struct u2_user));
 	if (u2_cfg == NULL) {
@@ -93,8 +94,7 @@ parse_args(int argc, char **argv)
 
 	u2_cfg->ns_id = U2_NAMESPACE_ID;
 
-	/* -s io_size -q queue_depth -w workload */
-	while ((op = getopt(argc, argv, "s:q:w:")) != -1) {
+	while ((op = getopt(argc, argv, "s:q:m:c:")) != -1) {
 		switch (op) {
 		case 's':
 			u2_cfg->io_size = atoi(optarg);
@@ -102,8 +102,11 @@ parse_args(int argc, char **argv)
 		case 'q':
 			u2_cfg->queue_depth = atoi(optarg);
 			break;
-		case 'w':
-			workload = optarg;
+		case 'm':
+			u2_cfg->mode = optarg;
+			break;
+		case 'c':
+			u2_cfg->core_mask = optarg;
 			break;
 		default:
 			return 1;
@@ -120,17 +123,17 @@ parse_args(int argc, char **argv)
 
 	u2_cfg->is_random = U2_RANDOM;
 	u2_cfg->is_rw = U2_READ;
-	if (workload) {
-		if (!strcmp(workload, "read")) {
+	if (u2_cfg->mode) {
+		if (!strcmp(u2_cfg->mode, "read")) {
 			u2_cfg->is_random = U2_SEQUENTIAL;
 			u2_cfg->is_rw     = U2_READ;
-		} else if (!strcmp(workload, "write")) {
+		} else if (!strcmp(u2_cfg->mode, "write")) {
 			u2_cfg->is_random = U2_SEQUENTIAL;
 			u2_cfg->is_rw     = U2_WRITE;
-		} else if (!strcmp(workload, "randread")) {
+		} else if (!strcmp(u2_cfg->mode, "randread")) {
 			u2_cfg->is_random = U2_RANDOM;
 			u2_cfg->is_rw     = U2_READ;
-		} else if (!strcmp(workload, "randwrite")) {
+		} else if (!strcmp(u2_cfg->mode, "randwrite")) {
 			u2_cfg->is_random = U2_RANDOM;
 			u2_cfg->is_rw     = U2_WRITE;
 		}
@@ -173,10 +176,9 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
-	/* finish "u2" context setup. */
 	u2_ctx->ctrlr = ctrlr;
 	snprintf(u2_ctx->ctrlr_name, sizeof(u2_ctx->ctrlr_name), "%s (%s)", cdata->mn, cdata->sn);
-	u2_ctx->ns_num = spdk_nvme_ctrlr_get_num_ns(u2_ctx->ctrlr);
+	u2_ctx->ctrlr_ns_num = spdk_nvme_ctrlr_get_num_ns(u2_ctx->ctrlr);
 
 	u2_ctx->ns = spdk_nvme_ctrlr_get_ns(u2_ctx->ctrlr, u2_ctx->ns_id);
 	u2_ctx->ns_sector_size = spdk_nvme_ns_get_sector_size(u2_ctx->ns);
@@ -190,7 +192,15 @@ u2_init(void)
 {
 	int i, rc;
 
-	/* initialize DPDK EAL. */
+	if (u2_cfg->core_mask) {
+		ealargs[1] = malloc(sizeof("-c ") + strlen(u2_cfg->core_mask));
+		if (ealargs[1] == NULL) {
+			fprintf(stderr, "failed to malloc ealargs[1]!\n");
+			return 1;
+		}
+		sprintf(ealargs[1], "-c %s", u2_cfg->core_mask);
+	}
+
 	rc = rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]),
 				(char **)(void *)(uintptr_t)ealargs);
 	if (rc < 0) {
@@ -198,11 +208,14 @@ u2_init(void)
 		return rc;
 	}
 
+	if (u2_cfg->core_mask) {
+		free(ealargs[1]);
+	}
+
 	printf("\n===================================\n");
-	printf(  "  NVMe/U2 bw - ict.ncic.syssw.ufo"    );
+	printf(  "  NVMe/U2 BW - ict.ncic.syssw.ufo"    );
 	printf("\n===================================\n");
 
-	/* allocate memory pools for NVMe requests. */
 	request_mempool = rte_mempool_create("nvme_request",
 				U2_REQUEST_POOL_SIZE, spdk_nvme_request_size(),
 				U2_REQUEST_CACHE_SIZE, U2_REQUEST_PRIVATE_SIZE,
@@ -213,7 +226,6 @@ u2_init(void)
 		return 1;
 	}
 
-	/* preliminarily initialize the "u2" context . */
 	u2_ctx = malloc(sizeof(struct u2_context));
 	if (u2_ctx == NULL) {
 		fprintf(stderr, "failed to allocate u2_context!\n");
@@ -231,13 +243,11 @@ u2_init(void)
 
 	u2_ctx->tsc_rate    = rte_get_timer_hz();
 
-	/* probe and attach to the namespace. */
 	if (spdk_nvme_probe(NULL, probe_cb, attach_cb)) {
 		fprintf(stderr, "failed to probe and attach to NVMe device!\n");
 		return 1;
 	}
 
-	/* allocate a group of buffers aligned to 512-byte from hugepages. */
 	u2_ctx->buf = malloc(u2_ctx->queue_depth * sizeof(void *));
 	if (u2_ctx->buf == NULL) {
 		fprintf(stderr, "failed to malloc buffer!\n");
@@ -282,7 +292,7 @@ u2_perf_test()
 	printf("\tRW mode: %s %s\n", u2_cfg->is_random ? "random" : "sequential", u2_cfg->is_rw ? "read" : "write");
 
 	io_size_blocks = u2_ctx->io_size / u2_ctx->ns_sector_size;
-	offset_in_ios  = -1;
+	offset_in_ios  = 0;
 	size_in_ios    = u2_ctx->ns_size / u2_ctx->io_size;
 
 	if (spdk_nvme_register_io_thread()) {
@@ -362,6 +372,7 @@ int main(int argc, char *argv[])
 		printf("\t-s IO size in bytes\n");
 		printf("\t-q IO queue depth\n");
 		printf("\t-w IO pattern, must be one of (read, write, randread, randwrite)\n");
+		printf("\t-c core mask\n");
 		return 1;
 	}
 
