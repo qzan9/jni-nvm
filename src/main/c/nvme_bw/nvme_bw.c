@@ -1,14 +1,15 @@
 /*
  * nvme_bw/u2_bw
  *
- *   pick the first namespace of the first probed NVMe device and do some basic benchmarking.
- *
- *   RESTRICTED to just ONE thread and ONE namespace.
+ *   RESTRICTED to just ONE thread and ONE controller and ONE namespace.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
+#include <stddef.h>
+
 #include <unistd.h>
 
 #include <rte_config.h>
@@ -24,9 +25,10 @@
 
 #define U2_NAMESPACE_ID			(1)
 
-#define U2_QUEUE_DEPTH			(7168)
+#define U2_IO_DEPTH			(128)
 
-#define U2_IO_SIZE			(4096)
+#define U2_IO_SIZE_4KB			(4096)
+
 #define U2_BUFFER_ALIGN			(0x200)
 
 #define U2_RANDOM			(1)
@@ -35,314 +37,308 @@
 #define U2_READ				(1)
 #define U2_WRITE			(0)
 
-struct u2_user {
-//	char ctrlr_pci_id[16];
-	uint32_t ns_id;
-	uint32_t io_size;
-	uint32_t queue_depth;
-	int is_random;
-	int is_rw;
-	char *mode;
-	char *core_mask;
-};
+#define U2_TIME_SEC			(180)
 
-struct u2_context {
-//	char ctrlr_pci_id[16];
-	struct spdk_nvme_ctrlr *ctrlr;
-	char ctrlr_name[1024];
-	uint32_t ctrlr_ns_num;
+//static struct spdk_pci_device *u2_dev;
 
-	uint32_t ns_id;
-	struct spdk_nvme_ns *ns;
-	uint32_t ns_sector_size;
-	uint64_t ns_size;
+static struct spdk_nvme_ctrlr *u2_ctrlr;
+static char u2_ctrlr_name[1024];
+static uint32_t u2_ctrlr_ns_num;
 
-	uint32_t io_size;
-	uint32_t queue_depth;
-	uint32_t io_completed;
+static uint32_t u2_ns_id;
+static struct spdk_nvme_ns *u2_ns;
+static uint32_t u2_ns_sector_size;
+static uint64_t u2_ns_size;
 
-	void **buf;
+static struct spdk_nvme_qpair *u2_qpair;
 
-	int is_random;
-	int is_rw;
+static uint32_t io_size_in_bytes;
+static uint32_t io_depth;
+static uint32_t io_completed;
 
-	uint64_t tsc_start;
-	uint64_t tsc_end;
-	uint64_t tsc_rate;
-};
+static uint8_t is_random;
+static uint8_t is_rw;
+
+static char *core_mask;
+static uint8_t mem_chn;
+static uint32_t time_in_sec;
 
 struct rte_mempool *request_mempool;
 
-static struct u2_user *u2_cfg;
-static struct u2_context *u2_ctx;
-
 static unsigned int seed = 0;
 
-static char *ealargs[] = { "nvme_bw", "-c 0x1", "-n 4", };
+static char *ealargs[] = { "nvme_bw", "-c 0x1", "-n 1", };
 
 static int
 parse_args(int argc, char **argv)
 {
 	int op;
+	char *workload;
 
-	u2_cfg = malloc(sizeof(struct u2_user));
-	if (u2_cfg == NULL) {
-		fprintf(stderr, "failed to malloc u2_cfg!\n");
-		return 1;
-	}
-	memset(u2_cfg, 0, sizeof(struct u2_user));
+	u2_ctrlr = NULL;
+	u2_ns_id = U2_NAMESPACE_ID;
+	u2_ns = NULL;
 
-	u2_cfg->ns_id = U2_NAMESPACE_ID;
-
-	while ((op = getopt(argc, argv, "s:q:m:c:")) != -1) {
+	while ((op = getopt(argc, argv, "s:q:w:c:n:t:")) != -1) {
 		switch (op) {
 		case 's':
-			u2_cfg->io_size = atoi(optarg);
+			io_size_in_bytes = atoi(optarg);
 			break;
 		case 'q':
-			u2_cfg->queue_depth = atoi(optarg);
+			io_depth = atoi(optarg);
 			break;
-		case 'm':
-			u2_cfg->mode = optarg;
+		case 'w':
+			workload = optarg;
 			break;
 		case 'c':
-			u2_cfg->core_mask = optarg;
+			core_mask = optarg;
 			break;
+		case 'n':
+			mem_chn = atoi(optarg);
+			break;
+		case 't':
+			time_in_sec = atoi(optarg);
 		default:
 			return 1;
 		}
 	}
 
-	if (!u2_cfg->io_size) {
-		u2_cfg->io_size = U2_IO_SIZE;
+	if (!io_size_in_bytes) {
+		io_size_in_bytes = U2_IO_SIZE_4KB;
 	}
 
-	if (!u2_cfg->queue_depth) {
-		u2_cfg->queue_depth = U2_QUEUE_DEPTH;
+	if (!io_depth || io_depth >= U2_REQUEST_POOL_SIZE) {
+		io_depth = U2_IO_DEPTH;
 	}
 
-	u2_cfg->is_random = U2_RANDOM;
-	u2_cfg->is_rw = U2_READ;
-	if (u2_cfg->mode) {
-		if (!strcmp(u2_cfg->mode, "read")) {
-			u2_cfg->is_random = U2_SEQUENTIAL;
-			u2_cfg->is_rw     = U2_READ;
-		} else if (!strcmp(u2_cfg->mode, "write")) {
-			u2_cfg->is_random = U2_SEQUENTIAL;
-			u2_cfg->is_rw     = U2_WRITE;
-		} else if (!strcmp(u2_cfg->mode, "randread")) {
-			u2_cfg->is_random = U2_RANDOM;
-			u2_cfg->is_rw     = U2_READ;
-		} else if (!strcmp(u2_cfg->mode, "randwrite")) {
-			u2_cfg->is_random = U2_RANDOM;
-			u2_cfg->is_rw     = U2_WRITE;
+	io_completed = 0;
+
+	is_random = U2_RANDOM;
+	is_rw = U2_READ;
+	if (workload) {
+		if (!strcmp(workload, "read")) {
+			is_random = U2_SEQUENTIAL;
+			is_rw = U2_READ;
+		//} else if (!strcmp(workload, "randread")) {
+		//	is_random = U2_RANDOM;
+		//	is_rw = U2_READ;
+		} else if (!strcmp(workload, "write")) {
+			is_random = U2_SEQUENTIAL;
+			is_rw = U2_WRITE;
+		} else if (!strcmp(workload, "randwrite")) {
+			is_random = U2_RANDOM;
+			is_rw = U2_WRITE;
 		}
+	}
+
+	if (core_mask) {
+		ealargs[1] = malloc(sizeof("-c ") + strlen(core_mask));
+		if (ealargs[1] == NULL) {
+			fprintf(stderr, "failed to malloc ealargs[1]!\n");
+			return 1;
+		}
+		sprintf(ealargs[1], "-c %s", core_mask);
+	}
+
+	if (mem_chn >= 2 && mem_chn <= 4) {
+		ealargs[2] = malloc(sizeof("-n 1"));
+		if (ealargs[2] == NULL) {
+			fprintf(stderr, "failed to malloc ealargs[2]!\n");
+			return 1;
+		}
+		sprintf(ealargs[2], "-n %d", mem_chn);
+	} else {
+		mem_chn = 1;
+	}
+
+	if (!time_in_sec) {
+		time_in_sec = U2_TIME_SEC;
 	}
 
 	return 0;
 }
 
 static bool
-probe_cb(void *cb_ctx, struct spdk_pci_device *dev)
+probe_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr_opts *opts)
 {
-	/* just attach to the firstly probed NVMe device. */
-	if (u2_ctx->ctrlr) {
+	if (u2_ctrlr) {
 		return false;
 	}
 
 	if (spdk_pci_device_has_non_uio_driver(dev)) {
-		fprintf(stderr, "non-uio/kernel driver attached to NVMe!\n");
-		fprintf(stderr, "  controller at PCI address %04x:%02x:%02x.%02x\n",
+		fprintf(stderr, "%04x:%02x:%02x.%02x: non-UIO/kernel driver detected!\n",
 				spdk_pci_device_get_domain(dev),
 				spdk_pci_device_get_bus(dev),
 				spdk_pci_device_get_dev(dev),
 				spdk_pci_device_get_func(dev));
-		fprintf(stderr, "  skipping...\n");
 		return false;
-	} else {
-		printf("attaching to %04x:%02x:%02x.%02x ... ",
+	}
+
+	return true;
+}
+
+static void
+attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
+{
+	const struct spdk_nvme_ctrlr_data *cdata;
+
+	u2_ctrlr = ctrlr;
+
+	cdata = spdk_nvme_ctrlr_get_data(u2_ctrlr);
+
+	memset(u2_ctrlr_name, 0, sizeof(u2_ctrlr_name));
+	snprintf(u2_ctrlr_name, sizeof(u2_ctrlr_name), "%s (%s)", cdata->mn, cdata->sn);
+	u2_ctrlr_ns_num = spdk_nvme_ctrlr_get_num_ns(u2_ctrlr);
+
+	u2_ns = spdk_nvme_ctrlr_get_ns(u2_ctrlr, u2_ns_id);
+	u2_ns_sector_size = spdk_nvme_ns_get_sector_size(u2_ns);
+	u2_ns_size = spdk_nvme_ns_get_size(u2_ns);
+
+	u2_qpair = spdk_nvme_ctrlr_alloc_io_qpair(u2_ctrlr, 0);
+
+	printf("attached to %04x:%02x:%02x.%02x!\n",
 			spdk_pci_device_get_domain(dev),
 			spdk_pci_device_get_bus(dev),
 			spdk_pci_device_get_dev(dev),
 			spdk_pci_device_get_func(dev));
-		return true;
-	}
-}
-
-static void
-attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctrlr)
-{
-	const struct spdk_nvme_ctrlr_data *cdata;
-
-	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
-
-	u2_ctx->ctrlr = ctrlr;
-	snprintf(u2_ctx->ctrlr_name, sizeof(u2_ctx->ctrlr_name), "%s (%s)", cdata->mn, cdata->sn);
-	u2_ctx->ctrlr_ns_num = spdk_nvme_ctrlr_get_num_ns(u2_ctx->ctrlr);
-
-	u2_ctx->ns = spdk_nvme_ctrlr_get_ns(u2_ctx->ctrlr, u2_ctx->ns_id);
-	u2_ctx->ns_sector_size = spdk_nvme_ns_get_sector_size(u2_ctx->ns);
-	u2_ctx->ns_size = spdk_nvme_ns_get_size(u2_ctx->ns);
-
-	printf("attached to [%s - %d]!\n", u2_ctx->ctrlr_name, u2_ctx->ns_id);
 }
 
 static int
 u2_init(void)
 {
-	int i, rc;
-
-	if (u2_cfg->core_mask) {
-		ealargs[1] = malloc(sizeof("-c ") + strlen(u2_cfg->core_mask));
-		if (ealargs[1] == NULL) {
-			fprintf(stderr, "failed to malloc ealargs[1]!\n");
-			return 1;
-		}
-		sprintf(ealargs[1], "-c %s", u2_cfg->core_mask);
-	}
-
-	rc = rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]),
-				(char **)(void *)(uintptr_t)ealargs);
-	if (rc < 0) {
+	if (rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]), ealargs) < 0) {
 		fprintf(stderr, "failed to initialize DPDK EAL!\n");
-		return rc;
-	}
-
-	if (u2_cfg->core_mask) {
-		free(ealargs[1]);
+		return 1;
 	}
 
 	printf("\n===================================\n");
-	printf(  "  NVMe/U2 BW - ict.ncic.syssw.ufo"    );
+	printf("  NVMe/U2 BW - ict.ncic.syssw.ufo"      );
 	printf("\n===================================\n");
 
 	request_mempool = rte_mempool_create("nvme_request",
-				U2_REQUEST_POOL_SIZE, spdk_nvme_request_size(),
-				U2_REQUEST_CACHE_SIZE, U2_REQUEST_PRIVATE_SIZE,
-				NULL, NULL, NULL, NULL,
-				SOCKET_ID_ANY, 0);
+		U2_REQUEST_POOL_SIZE, spdk_nvme_request_size(),
+		U2_REQUEST_CACHE_SIZE, U2_REQUEST_PRIVATE_SIZE,
+		NULL, NULL, NULL, NULL,
+		SOCKET_ID_ANY, 0);
 	if (request_mempool == NULL) {
 		fprintf(stderr, "failed to create request pool!\n");
 		return 1;
 	}
-
-	u2_ctx = malloc(sizeof(struct u2_context));
-	if (u2_ctx == NULL) {
-		fprintf(stderr, "failed to allocate u2_context!\n");
-		return 1;
-	}
-	memset(u2_ctx, 0, sizeof(struct u2_context));
-
-	u2_ctx->ns_id       = u2_cfg->ns_id;
-
-	u2_ctx->io_size     = u2_cfg->io_size;
-	u2_ctx->queue_depth = (u2_cfg->queue_depth < U2_REQUEST_POOL_SIZE) ? u2_cfg->queue_depth : U2_QUEUE_DEPTH;
-
-	u2_ctx->is_random   = u2_cfg->is_random;
-	u2_ctx->is_rw       = u2_cfg->is_random;
-
-	u2_ctx->tsc_rate    = rte_get_timer_hz();
 
 	if (spdk_nvme_probe(NULL, probe_cb, attach_cb)) {
 		fprintf(stderr, "failed to probe and attach to NVMe device!\n");
 		return 1;
 	}
 
-	u2_ctx->buf = malloc(u2_ctx->queue_depth * sizeof(void *));
-	if (u2_ctx->buf == NULL) {
-		fprintf(stderr, "failed to malloc buffer!\n");
+	if (!u2_ctrlr) {
+		fprintf(stderr, "failed to probe a suitable controller!\n");
 		return 1;
 	}
-	for (i = 0; i < u2_ctx->queue_depth; i++) {
-		u2_ctx->buf[i] = rte_malloc(NULL, u2_ctx->io_size, U2_BUFFER_ALIGN);
-		if (u2_ctx->buf[i] == NULL) {
-			fprintf(stderr, "failed to rte_malloc buffer!\n");
-			return 1;
-		}
+
+	if (!spdk_nvme_ns_is_active(u2_ns)) {
+		fprintf(stderr, "namespace %d of controller %s is IN-ACTIVE!\n", u2_ns_id, u2_ctrlr_name);
+		return 1;
 	}
 
+	if (!u2_qpair) {
+		fprintf(stderr, "failed to allocate queue pair!\n");
+		return 1;
+	}
+	
 	return 0;
 }
 
 static void
 u2_io_complete(void *cb_args, const struct spdk_nvme_cpl *completion)
 {
-	struct u2_context *u2_ctx = (struct u2_context *)cb_args;
-
-	/* count the I/O completions. */
-	u2_ctx->io_completed++;
+	io_completed++;
 }
 
 static int
-u2_perf_test()
+u2_bench(void)
 {
 	int i, rc;
 
-	uint32_t io_size_blocks;
-
+	//void *buf;
+	void **buf;
+	uint32_t io_size_in_blocks;
 	uint64_t offset_in_ios;
 	uint64_t size_in_ios;
 
-	int elapsed_time;
+	uint64_t tsc_elapsed, tsc_start;
+	uint64_t tsc_rate;
+
 	float io_per_sec, mb_per_sec;
 
-	printf("u2 benchmarking started ...\n");
-	printf("\tper I/O size: %d B, queue depth: %d\n", u2_ctx->io_size, u2_ctx->queue_depth);
-	printf("\ttotal I/O size: %d MB\n", u2_ctx->io_size * u2_ctx->queue_depth / 1024 / 1024);
-	printf("\tRW mode: %s %s\n", u2_cfg->is_random ? "random" : "sequential", u2_cfg->is_rw ? "read" : "write");
+	//buf = rte_malloc(NULL, io_size, U2_BUFFER_ALIGN);
+	//if (buf == NULL) {
+	//	fprintf(stderr, "failed to rte_malloc buffer!\n");
+	//	return 1;
+	//}
+	//memset(buf, 0xff, io_size);
 
-	io_size_blocks = u2_ctx->io_size / u2_ctx->ns_sector_size;
-	offset_in_ios  = 0;
-	size_in_ios    = u2_ctx->ns_size / u2_ctx->io_size;
-
-	if (spdk_nvme_register_io_thread()) {
-		fprintf(stderr, "failed to register thread!\n");
+	buf = malloc(io_depth * sizeof(void *));
+	if (buf == NULL) {
+		fprintf(stderr, "failed to malloc buffer!\n");
 		return 1;
 	}
+	for (i = 0; i < io_depth; i++) {
+		buf[i] = rte_malloc(NULL, io_size_in_bytes, U2_BUFFER_ALIGN);
+		if (buf[i] == NULL) {
+			fprintf(stderr, "failed to rte_malloc buffer!\n");
+			return 1;
+		}
+	}
 
-	u2_ctx->tsc_start = rte_get_timer_cycles();
+	io_size_in_blocks = io_size_in_bytes / u2_ns_sector_size;
+	offset_in_ios = -1;
+	size_in_ios = u2_ns_size / io_size_in_bytes;
 
-	/* submit I/O requests of number of queue_depth. */
-	for (i = 0; i < u2_ctx->queue_depth; i++) {
-		if (u2_ctx->is_random) {
+	tsc_elapsed = 0;
+	tsc_rate = rte_get_timer_hz();
+
+	tsc_start = rte_get_timer_cycles();
+	for (i = 0; i < io_depth; i++) {
+		if (is_random) {
 			offset_in_ios = rand_r(&seed) % size_in_ios;
 		} else {
-			offset_in_ios++;
-			if (offset_in_ios == size_in_ios) {
+			if (++offset_in_ios == size_in_ios) {
 				offset_in_ios = 0;
 			}
 		}
 
-		if (u2_ctx->is_rw) {
-			rc = spdk_nvme_ns_cmd_read (u2_ctx->ns, u2_ctx->buf[i], offset_in_ios * io_size_blocks,
-					io_size_blocks, u2_io_complete, u2_ctx, 0);
+		if (is_rw) {
+			//rc = spdk_nvme_ns_cmd_read (u2_ns, buf, offset_in_ios * io_size_blocks, io_size_blocks, u2_io_complete, NULL, 0);
+			rc = spdk_nvme_ns_cmd_read (u2_ns, u2_qpair, buf[i], offset_in_ios * io_size_in_blocks, io_size_in_blocks, u2_io_complete, NULL, 0);
 		} else {
-			rc = spdk_nvme_ns_cmd_write(u2_ctx->ns, u2_ctx->buf[i], offset_in_ios * io_size_blocks,
-					io_size_blocks, u2_io_complete, u2_ctx, 0);
+			//rc = spdk_nvme_ns_cmd_write(u2_ns, buf, offset_in_ios * io_size_blocks, io_size_blocks, u2_io_complete, NULL, 0);
+			rc = spdk_nvme_ns_cmd_write(u2_ns, u2_qpair, buf[i], offset_in_ios * io_size_in_blocks, io_size_in_blocks, u2_io_complete, NULL, 0);
 		}
 
 		if (rc) {
-			fprintf(stderr, "failed to submit request %d!\n", i);
+			fprintf(stderr, "failed to submit I/O request %d!\n", i);
 			return rc;
 		}
 	}
-
 	/* polling/busy-waiting for the completions. */
-	while (u2_ctx->io_completed != u2_ctx->queue_depth - 1) {
-		spdk_nvme_ctrlr_process_io_completions(u2_ctx->ctrlr, 0);
+	while (io_completed < io_depth) {
+		spdk_nvme_qpair_process_completions(u2_qpair, 0);
 	}
+	tsc_elapsed = rte_get_timer_cycles() - tsc_start;
 
-	u2_ctx->tsc_end = rte_get_timer_cycles();
+	//rte_free(buf);
 
-	spdk_nvme_unregister_io_thread();
+	for (i = 0; i < io_depth; i++) {
+		rte_free(buf[i]);
+	}
+	free(buf);
 
-	/* calculate and display the performance statistics. */
-	elapsed_time = (u2_ctx->tsc_end - u2_ctx->tsc_start) * 1000 * 1000 / u2_ctx->tsc_rate;
-	io_per_sec = (float)u2_ctx->io_completed * 1000 * 1000 / elapsed_time;
-	mb_per_sec = io_per_sec * u2_ctx->io_size / (1024 * 1024);
+	io_per_sec = (float) io_completed / tsc_elapsed * tsc_rate;
+	//mb_per_sec = (float) io_per_sec * io_size / (1024 * 1024);
+	mb_per_sec = (float) io_per_sec * io_size_in_bytes / 1000000;
 
 	printf("u2 benchmarking results:\n");
-	printf("\telapsed time: %d us\n", elapsed_time);
+	printf("\telapsed time: %.2f us\n", (float) (tsc_elapsed * 1000000) / tsc_rate);
 	printf("\tIO: %.2f IO/s, Bandwidth: %.2f MB/s\n", io_per_sec, mb_per_sec);
 
 	return 0;
@@ -351,44 +347,46 @@ u2_perf_test()
 static void
 u2_cleanup(void)
 {
-	int i;
+	spdk_nvme_ctrlr_free_io_qpair(u2_qpair);
 
-	spdk_nvme_detach(u2_ctx->ctrlr);
+	spdk_nvme_detach(u2_ctrlr);
 
-	for (i = 0; i < u2_ctx->io_completed; i++) {
-		rte_free(u2_ctx->buf[i]);
+	if (core_mask) {
+		free(ealargs[1]);
 	}
-	free(u2_ctx->buf);
 
-	free(u2_ctx);
-	free(u2_cfg);
+	if (mem_chn >= 2 && mem_chn <= 4) {
+		free(ealargs[2]);
+	}
 }
 
 int main(int argc, char *argv[])
 {
-	/* parse the arguments. */
 	if (parse_args(argc, argv)) {
 		printf("usage: %s [OPTION]...\n", argv[0]);
-		printf("\t-s IO size in bytes\n");
-		printf("\t-q IO queue depth\n");
-		printf("\t-w IO pattern, must be one of (read, write, randread, randwrite)\n");
-		printf("\t-c core mask\n");
+		printf("\t-s [I/O size in bytes]\n");
+		printf("\t-q [I/O queue depth]\n");
+		printf("\t-w [I/O workload (read, randread, write, randwrite)]\n");
+		printf("\t-n [memory channels]\n");
+		printf("\t-c [core mask]\n");
+		printf("\t-t [time in seconds]\n");
 		return 1;
 	}
 
-	/* initialize and prepare for the benchmark. */
 	if (u2_init()) {
 		fprintf(stderr, "failed to initialize u2 context!\n");
 		return 1;
 	}
 
-	/* execute I/O performance benchmark. */
-	if (u2_perf_test()) {
-		fprintf(stderr, "failed to benchmark I/O!\n");
+	printf("u2 benchmarking started ...\n");
+	printf("\tmemory channels: %d\n", mem_chn);
+	printf("\tper I/O size: %d B, I/O depth: %d, RW type: %s %s, Time: %d\n",
+		io_size_in_bytes, io_depth, is_random ? "random" : "sequential", is_rw ? "read" : "write", time_in_sec);
+	if (u2_bench()) {
+		fprintf(stderr, "failed to benchmark!\n");
 		return 1;
 	}
 
-	/* release the resources. */
 	u2_cleanup();
 
 	return 0;
