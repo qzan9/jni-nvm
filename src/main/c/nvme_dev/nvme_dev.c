@@ -3,19 +3,8 @@
  *
  * display basic information of all the NVMe devices currently attached.
  *
- * for SPDK, this demonstrates the usage of:
- *
- * - spdk_nvme_probe(): enumerate the NVMe devices attached to the system and attach the userspace NVMe driver to them if desired.
- *
- * - spdk_nvme_detach(): detaches the specified device.
- *
- * - spdk_nvme_ctrlr_get_data(): get the identity controller data as defined by the NVMe specification.
- *
- * - spdk_nvme_ctrlr_cmd_get_log_page(): get a specific log page from the NVMe controller.
- *
- * - spdk_nvme_ctrlr_cmd_admin_raw(): a low-level interface to send the given admin command to the NVMe controller.
- *
- * - spdk_nvme_ctrlr_process_admin_completions(): process any outstanding completions for administration commands.
+ * author(s):
+ *   azq  @qzan9  anzhongqi@ncic.ac.cn
  */
 
 #include <stdbool.h>
@@ -29,6 +18,10 @@
 #include <spdk/nvme.h>
 #include <spdk/pci.h>
 
+#define U2_REQUEST_POOL_SIZE		(1024)
+#define U2_REQUEST_CACHE_SIZE		(0)
+#define U2_REQUEST_PRIVATE_SIZE		(0)
+
 struct feature {
 	uint32_t result;
 	bool valid;
@@ -41,7 +34,7 @@ static struct spdk_nvme_health_information_page *health_page;
 
 static int outstanding_commands;
 
-static char *ealargs[] = { "nvme_dev", "-c 0x1", "-n 4", };    // be careful with the number of memory channels.
+static char *ealargs[] = { "nvme_dev", "-c 0x1", "-n 1", };    // be careful with the number of memory channels.
 
 static void
 print_uint128_hex(uint64_t *v)
@@ -137,11 +130,6 @@ get_health_log_page(struct spdk_nvme_ctrlr *ctrlr)
 			fprintf(stderr, "failed to allocate health page!\n");
 			return 1;
 		}
-		//health_page = malloc(sizeof(*health_page));
-		//if (NULL == health_page) {
-		//	perror("health_page malloc");
-		//	return 1;
-		//}
 	}
 
 	if (spdk_nvme_ctrlr_cmd_get_log_page(ctrlr, SPDK_NVME_LOG_HEALTH_INFORMATION, SPDK_NVME_GLOBAL_NS_TAG,
@@ -183,7 +171,7 @@ print_namespace(struct spdk_nvme_ns *ns)
 	printf("\t    Capacity (in LBAs):     %lld (%lldM)\n", (long long)nsdata->ncap, (long long)nsdata->ncap/1024/1024);
 	printf("\t    Number of LBA Formats:  %d\n", nsdata->nlbaf + 1);
 	for (i = 0; i <= nsdata->nlbaf; i++) {
-	printf("\t      LBA Format #%02d: Data Size - %4d, Metadata Size - %2d\n", i, 1 << nsdata->lbaf[i].lbads, nsdata->lbaf[i].ms);
+	printf("\t      LBA Format #%02d: Data Size - %4d, Metadata Size - %3d\n", i, 1 << nsdata->lbaf[i].lbads, nsdata->lbaf[i].ms);
 	}
 	printf("\t    Current LBA Format:     #%02d\n", nsdata->flbas.format);
 }
@@ -262,33 +250,18 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *pci_dev, struct spdk_nvme_ctrlr 
 
 int main(int argc, char **argv)
 {
-	/*
-	 * initialize DPDK EAL: set up hugepage memory and PCI bus access, and create a thread for each core.
-	 *
-	 * arguments are defined in lib/librte_eal/common/eal_common_options.c.
-	 *
-	 * here c: coremask and n: memory channels.
-	 */
 	if (rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]), (char **)(void *)(uintptr_t)ealargs) < 0) {
 		fprintf(stderr, "failed to initialize DPDK EAL!\n");
 		return 1;
 	}
 
-	printf("\n====================================\n");
-	printf(  "  NVMe/U2 DEV - ict.ncic.syssw.ufo"    );
-	printf("\n====================================\n");
+	printf("\n========================================\n");
+	printf(  "  nvme_dev/u2_dev - ict.ncic.syssw.ufo"    );
+	printf("\n========================================\n");
 
-	/*
-	 * allocate a physically continuous chunk of memory for NVMe requests.
-	 *
-	 * request_mempool is declared in lib/nvme/nvme_impl.h as
-	 *
-	 *     extern struct rte_mempool *request_mempool;
-	 *
-	 * NVMe requests are stored in this mempool and allocated for each I/O.
-	 */
 	request_mempool = rte_mempool_create("nvme_request",
-					1024, spdk_nvme_request_size(), 0, 0,
+					U2_REQUEST_POOL_SIZE, spdk_nvme_request_size(),
+					U2_REQUEST_CACHE_SIZE, U2_REQUEST_PRIVATE_SIZE,
 					NULL, NULL, NULL, NULL,
 					SOCKET_ID_ANY, 0);
 	if (request_mempool == NULL) {
@@ -296,21 +269,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/*
-	 * enumerate NVMe devices and attach them to userspace.
-	 *
-	 * probe_cb verifies whether non-uio driver exists.
-	 *
-	 * attach_cb prints controller and namespace information and then detaches the controller.
-	 */
 	if (spdk_nvme_probe(NULL, probe_cb, attach_cb) != 0) {
 		fprintf(stderr, "spdk_nvme_probe() failed!\n");
 		return 1;
 	}
 
-	/*
-	 * free the RTE-allocated resources.
-	 */
 	if (health_page) {
 		rte_free(health_page);
 		health_page = NULL;
