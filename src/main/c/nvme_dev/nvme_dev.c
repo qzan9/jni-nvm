@@ -1,10 +1,5 @@
 /*
- * nvme_dev/u2_dev
- *
- * display basic information of all the NVMe devices currently attached.
- *
- * author(s):
- *   azq  @qzan9  anzhongqi@ncic.ac.cn
+ * nvme_dev/u2_dev: display basic information of all the NVMe devices currently attached.
  */
 
 #include <stdbool.h>
@@ -18,9 +13,9 @@
 #include <spdk/nvme.h>
 #include <spdk/pci.h>
 
-#define U2_REQUEST_POOL_SIZE		(1024)
-#define U2_REQUEST_CACHE_SIZE		(0)
-#define U2_REQUEST_PRIVATE_SIZE		(0)
+#define U2_REQUEST_POOL_SIZE    (1024)
+#define U2_REQUEST_CACHE_SIZE   (0)
+#define U2_REQUEST_PRIVATE_SIZE (0)
 
 struct feature {
 	uint32_t result;
@@ -125,7 +120,7 @@ static int
 get_health_log_page(struct spdk_nvme_ctrlr *ctrlr)
 {
 	if (NULL == health_page) {
-		health_page = rte_zmalloc("nvme health", sizeof(*health_page), 4096);
+		health_page = rte_zmalloc("nvme_health", sizeof(*health_page), 4096);
 		if (NULL == health_page) {
 			fprintf(stderr, "failed to allocate health page!\n");
 			return 1;
@@ -133,7 +128,7 @@ get_health_log_page(struct spdk_nvme_ctrlr *ctrlr)
 	}
 
 	if (spdk_nvme_ctrlr_cmd_get_log_page(ctrlr, SPDK_NVME_LOG_HEALTH_INFORMATION, SPDK_NVME_GLOBAL_NS_TAG,
-					health_page, sizeof(*health_page), get_log_page_completion, NULL)) {
+	                                     health_page, sizeof(*health_page), get_log_page_completion, NULL)) {
 		fprintf(stderr, "spdk_nvme_ctrlr_cmd_get_log_page() failed!\n");
 		return 1;
 	}
@@ -145,8 +140,8 @@ static void
 get_log_pages(struct spdk_nvme_ctrlr *ctrlr)
 {
 	const struct spdk_nvme_ctrlr_data *ctrlr_data;
-	outstanding_commands = 0;
 
+	outstanding_commands = 0;
 	if (get_health_log_page(ctrlr) == 0) {
 		outstanding_commands++;
 	} else {
@@ -225,15 +220,15 @@ print_controller(struct spdk_nvme_ctrlr *ctrlr, struct spdk_pci_device *pci_dev)
 }
 
 static bool
-probe_cb(void *cb_ctx, struct spdk_pci_device *dev)
+probe_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr_opts *opts)
 {
 	if (spdk_pci_device_has_non_uio_driver(dev)) {
 		fprintf(stderr, "non-uio kernel driver attached to the NVMe deivce!\n");
 		fprintf(stderr, "  controller at PCI address %04x:%02x:%02x.%02x\n",
-			spdk_pci_device_get_domain(dev),
-			spdk_pci_device_get_bus(dev),
-			spdk_pci_device_get_dev(dev),
-			spdk_pci_device_get_func(dev));
+		        spdk_pci_device_get_domain(dev),
+		        spdk_pci_device_get_bus(dev),
+		        spdk_pci_device_get_dev(dev),
+		        spdk_pci_device_get_func(dev));
 		fprintf(stderr, "  skipping...\n");
 		return false;
 	}
@@ -242,7 +237,7 @@ probe_cb(void *cb_ctx, struct spdk_pci_device *dev)
 }
 
 static void
-attach_cb(void *cb_ctx, struct spdk_pci_device *pci_dev, struct spdk_nvme_ctrlr *ctrlr)
+attach_cb(void *cb_ctx, struct spdk_pci_device *pci_dev, struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
 {
 	print_controller(ctrlr, pci_dev);
 	spdk_nvme_detach(ctrlr);
