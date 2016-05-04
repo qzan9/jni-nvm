@@ -1,13 +1,20 @@
 # project files
 PROJECT  := libjninvme
 
-CFILES   := jni_spdk.c identify.c perf.c
+CFILES   := jninvme.c
 DEPFILES :=
 
-ROOT     := ../../../..
-
+# basic configuration
+dbg      :=
 shared   := 1
+
 jni      := 1
+ibv      :=
 spdk     := 1
+
+myrdma   :=
+mynvme   :=
+
+u2       :=
 
 include ../../../../mk/common.mk
