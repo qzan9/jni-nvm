@@ -8,26 +8,22 @@ import java.nio.ByteBuffer;
 import java.util.Random;
 
 public class Main {
-	public static void main(String[] args) {
+	public static void main(String[] args) throws InterruptedException {
 		JniNvme.nvmeInitialize();
 
-		ByteBuffer bufferW = JniNvme.allocateHugepageMemory(512);
-		ByteBuffer bufferR = JniNvme.allocateHugepageMemory(512);
+		ByteBuffer bufferW = JniNvme.allocateHugepageMemory(4096);
+		ByteBuffer bufferR = JniNvme.allocateHugepageMemory(4096);
 
-		byte[] data = new byte[512];
+		byte[] data = new byte[4096];
 		(new Random()).nextBytes(data);
 		bufferW.put(data);
 
-		System.out.println("write, read, compare ...");
+		JniNvme.nvmeWrite(bufferW, 4096, 4096);
+		JniNvme.nvmeRead (bufferR, 4096, 4096);
 
-		JniNvme.nvmeWrite(bufferW, 0, 512);
-		JniNvme.nvmeRead (bufferR, 0, 512);
-
-		bufferW.flip();
-		bufferR.flip();
-		if (bufferR.compareTo(bufferW) == 0) {
-			System.out.println("YES!");
-		}
+		bufferW.rewind();
+		bufferR.rewind();
+		System.out.println(bufferR.compareTo(bufferW));
 
 		JniNvme.freeHugepageMemory(bufferW);
 		JniNvme.freeHugepageMemory(bufferR);

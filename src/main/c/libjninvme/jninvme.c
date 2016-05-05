@@ -45,7 +45,7 @@ static struct spdk_nvme_qpair *u2_qpair;
 static uint32_t io_depth;
 
 struct rte_mempool *request_mempool;
-static char *ealargs[] = { "nvme_lat", "-c 0x100", "-n 1", };
+static char *ealargs[] = { "libjninvme", "-c 0x100", "-n 1", };
 
 #ifdef __cplusplus
 extern "C" {
@@ -174,7 +174,7 @@ JNIEXPORT void JNICALL nvmeInitialize(JNIEnv *env, jobject thisObj)
 	}
 
 	if (!spdk_nvme_ns_is_active(u2_ns)) {
-		fprintf(stderr, "namespace %d is IN-ACTIVE!\n", u2_ns_id);
+		fprintf(stderr, "namespace %d is in-active!\n", u2_ns_id);
 		exit(1);
 	}
 
@@ -207,17 +207,14 @@ JNIEXPORT void JNICALL nvmeWrite(JNIEnv *env, jobject thisObj, jobject buffer, j
 	uint64_t offset_in_blocks;
 	uint32_t size_in_blocks;
 
-	//if (u2_ns_size < (uint64_t) io_size || u2_ns_size > (uint64_t) io_size) {
-	//	fprintf(stderr, "invalid namespace size %"PRIu64"!\n", u2_ns_size);
-	//	exit(1);
-	//}
+	if (u2_ns_size < size) {
+		fprintf(stderr, "invalid I/O size %"PRId64"!\n", (int64_t)size);
+		exit(1);
+	}
 
 	buf = (uint8_t *)(*env)->GetDirectBufferAddress(env, buffer);
 	offset_in_blocks = offset / u2_ns_sector;    // byte-address -> block-address: here is naive stupid wrong!!!
 	size_in_blocks = size / u2_ns_sector;
-
-	printf("[WRITE] offset_in_blocks: %"PRIu64"\n", offset_in_blocks);
-	printf("[WRITE] size_in_blocks:   %"PRIu32"\n", size_in_blocks);
 
 	if (spdk_nvme_ns_cmd_write(u2_ns, u2_qpair, buf, offset_in_blocks, size_in_blocks, u2_io_complete, NULL, 0)) {
 		fprintf(stderr, "failed to submit request!\n");
@@ -228,11 +225,6 @@ JNIEXPORT void JNICALL nvmeWrite(JNIEnv *env, jobject thisObj, jobject buffer, j
 	while (io_depth > 0) {
 		spdk_nvme_qpair_process_completions(u2_qpair, 0);
 	}
-
-	//for (int i = 0; i < size; i++) {
-	//	printf("%c", buf[i]);
-	//}
-	//printf("\n\n");
 }
 
 JNIEXPORT void JNICALL nvmeRead(JNIEnv *env, jobject thisObj, jobject buffer, jlong offset, jlong size)
@@ -241,17 +233,14 @@ JNIEXPORT void JNICALL nvmeRead(JNIEnv *env, jobject thisObj, jobject buffer, jl
 	uint64_t offset_in_blocks;
 	uint32_t size_in_blocks;
 
-	//if (u2_ns_size < (uint64_t) io_size || u2_ns_size > (uint64_t) io_size) {
-	//	fprintf(stderr, "invalid namespace size %"PRIu64"!\n", u2_ns_size);
-	//	exit(1);
-	//}
+	if (u2_ns_size < size) {
+		fprintf(stderr, "invalid I/O size %"PRId64"!\n", (int64_t)size);
+		exit(1);
+	}
 
 	buf = (uint8_t *)(*env)->GetDirectBufferAddress(env, buffer);
 	offset_in_blocks = offset / u2_ns_sector;    // byte-address -> block-address: here is naive stupid wrong!!!
 	size_in_blocks = size / u2_ns_sector;
-
-	printf("[READ] offset_in_blocks: %"PRIu64"\n", offset_in_blocks);
-	printf("[READ] size_in_blocks:   %"PRIu32"\n", size_in_blocks);
 
 	if (spdk_nvme_ns_cmd_read(u2_ns, u2_qpair, buf, offset_in_blocks, size_in_blocks, u2_io_complete, NULL, 0)) {
 		fprintf(stderr, "failed to submit request!\n");
@@ -262,27 +251,20 @@ JNIEXPORT void JNICALL nvmeRead(JNIEnv *env, jobject thisObj, jobject buffer, jl
 	while (io_depth > 0) {
 		spdk_nvme_qpair_process_completions(u2_qpair, 0);
 	}
-
-	//for (int i = 0; i < size; i++) {
-	//	printf("%c", buf[i]);
-	//}
-	//printf("\n\n");
 }
 
 JNIEXPORT jobject JNICALL allocateHugepageMemory(JNIEnv *env, jobject thisObj, jlong size)
 {
 	uint8_t *buf;
-	uint64_t io_size;
 
-	io_size = size;
-	buf = rte_malloc(NULL, io_size, U2_BUFFER_ALIGN);
+	buf = rte_malloc(NULL, size, U2_BUFFER_ALIGN);
 	if (buf == NULL) {
 		fprintf(stderr, "failed to allocate hugepage memory!\n");
 		exit(1);
 	}
-	memset(buf, 0x00, io_size);
+	memset(buf, 0x00, size);
 
-	return (*env)->NewDirectByteBuffer(env, buf, (jlong)io_size);
+	return (*env)->NewDirectByteBuffer(env, buf, (jlong)size);
 }
 
 JNIEXPORT void JNICALL freeHugepageMemory(JNIEnv *env, jobject thisObj, jobject buffer)
