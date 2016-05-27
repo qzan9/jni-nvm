@@ -14,8 +14,10 @@ OBJFILES     := $(patsubst %.c,$(OBJDIR)/%.o,$(notdir $(CFILES))) \
                 $(patsubst %.cpp,$(OBJDIR)/%.o,$(notdir $(CCFILES)))
 TARGETFILE   := $(OUTPUTDIR)/$(PROJECT)
 
-# 3rd-party SDK path
+# JDK
 JAVA_HOME    ?=
+
+# DPDK and SPDK
 DPDK_DIR     ?=
 SPDK_DIR     ?=
 
