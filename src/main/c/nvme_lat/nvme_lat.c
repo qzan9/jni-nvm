@@ -234,10 +234,10 @@ u2_init(void)
 		return 1;
 	}
 
-	//if (u2_ns_size < (uint64_t) io_size || u2_ns_size > (uint64_t) io_size) {
-	//	fprintf(stderr, "invalid namespace size %"PRIu64"!\n", u2_ns_size);
-	//	return 1;
-	//}
+	if (u2_ns_size < io_size) {
+		fprintf(stderr, "invalid I/O size %"PRIu32"!\n", io_size);
+		return 1;
+	}
 
 	if (!u2_qpair) {
 		fprintf(stderr, "failed to allocate queue pair!\n");
