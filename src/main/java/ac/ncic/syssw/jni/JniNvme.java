@@ -19,4 +19,8 @@ public final class JniNvme {
 
 	public static native void nvmeWrite(ByteBuffer buffer, long offset, long size);
 	public static native void nvmeRead(ByteBuffer buffer, long offset, long size);
+
+	//public static native void nvmeWriteAsync(long buffer, long offset, long size);
+	//public static native void nvmeReadAsync (long buffer, long offset, long size);
+	//public static native void nvmePoll();
 }

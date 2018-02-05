@@ -42,10 +42,11 @@ static uint64_t u2_ns_size;
 
 static struct spdk_nvme_qpair *u2_qpair;
 
+static uint32_t io_one;
 static uint32_t io_depth;
 
 struct rte_mempool *request_mempool;
-static char *ealargs[] = { "libjninvme", "-c 0x100", "-n 1", };
+static char *ealargs[] = { "jninvme", "-c 0x100", "-n 1", };
 
 #ifdef __cplusplus
 extern "C" {
@@ -151,7 +152,7 @@ JNIEXPORT void JNICALL nvmeInitialize(JNIEnv *env, jobject thisObj)
 	u2_ns_id = U2_NAMESPACE_ID;
 	u2_ns = NULL;
 
-	io_depth = 0;
+	io_one = 0;
 
 	request_mempool = rte_mempool_create("nvme_request",
 	                                     U2_REQUEST_POOL_SIZE, spdk_nvme_request_size(),
@@ -195,64 +196,6 @@ JNIEXPORT void JNICALL nvmeFinalize(JNIEnv *env, jobject thisObj)
 	}
 }
 
-static void
-u2_io_complete(void *cb_args, const struct spdk_nvme_cpl *completion)
-{
-	io_depth--;
-}
-
-JNIEXPORT void JNICALL nvmeWrite(JNIEnv *env, jobject thisObj, jobject buffer, jlong offset, jlong size)
-{
-	uint8_t *buf;
-	uint64_t offset_in_blocks;
-	uint32_t size_in_blocks;
-
-	if (u2_ns_size < size) {
-		fprintf(stderr, "invalid I/O size %"PRId64"!\n", (int64_t)size);
-		exit(1);
-	}
-
-	buf = (uint8_t *)(*env)->GetDirectBufferAddress(env, buffer);
-	offset_in_blocks = offset / u2_ns_sector;    // byte-address -> block-address: here is naive stupid wrong!!!
-	size_in_blocks = size / u2_ns_sector;
-
-	if (spdk_nvme_ns_cmd_write(u2_ns, u2_qpair, buf, offset_in_blocks, size_in_blocks, u2_io_complete, NULL, 0)) {
-		fprintf(stderr, "failed to submit request!\n");
-		exit(1);
-	}
-	io_depth++;
-
-	while (io_depth > 0) {
-		spdk_nvme_qpair_process_completions(u2_qpair, 0);
-	}
-}
-
-JNIEXPORT void JNICALL nvmeRead(JNIEnv *env, jobject thisObj, jobject buffer, jlong offset, jlong size)
-{
-	uint8_t *buf;
-	uint64_t offset_in_blocks;
-	uint32_t size_in_blocks;
-
-	if (u2_ns_size < size) {
-		fprintf(stderr, "invalid I/O size %"PRId64"!\n", (int64_t)size);
-		exit(1);
-	}
-
-	buf = (uint8_t *)(*env)->GetDirectBufferAddress(env, buffer);
-	offset_in_blocks = offset / u2_ns_sector;    // byte-address -> block-address: here is naive stupid wrong!!!
-	size_in_blocks = size / u2_ns_sector;
-
-	if (spdk_nvme_ns_cmd_read(u2_ns, u2_qpair, buf, offset_in_blocks, size_in_blocks, u2_io_complete, NULL, 0)) {
-		fprintf(stderr, "failed to submit request!\n");
-		exit(1);
-	}
-	io_depth++;
-
-	while (io_depth > 0) {
-		spdk_nvme_qpair_process_completions(u2_qpair, 0);
-	}
-}
-
 JNIEXPORT jobject JNICALL allocateHugepageMemory(JNIEnv *env, jobject thisObj, jlong size)
 {
 	uint8_t *buf;
@@ -272,5 +215,63 @@ JNIEXPORT void JNICALL freeHugepageMemory(JNIEnv *env, jobject thisObj, jobject 
 	uint8_t *buf = (uint8_t *)(*env)->GetDirectBufferAddress(env, buffer);
 
 	rte_free(buf);
+}
+
+static void
+u2_io_one_complete(void *cb_args, const struct spdk_nvme_cpl *completion)
+{
+	io_one = 0;
+}
+
+JNIEXPORT void JNICALL nvmeWrite(JNIEnv *env, jobject thisObj, jobject buffer, jlong offset, jlong size)
+{
+	uint8_t *buf;
+	uint64_t offset_in_blocks;
+	uint32_t size_in_blocks;
+
+	if (u2_ns_size < size) {
+		fprintf(stderr, "invalid I/O size %"PRId64"!\n", (int64_t)size);
+		exit(1);
+	}
+
+	buf = (uint8_t *)(*env)->GetDirectBufferAddress(env, buffer);
+	offset_in_blocks = offset / u2_ns_sector;    // byte-address -> block-address: here is naive stupid wrong!!!
+	size_in_blocks = size / u2_ns_sector;
+
+	if (spdk_nvme_ns_cmd_write(u2_ns, u2_qpair, buf, offset_in_blocks, size_in_blocks, u2_io_one_complete, NULL, 0)) {
+		fprintf(stderr, "failed to submit request!\n");
+		exit(1);
+	}
+	io_one = 1;
+
+	while (io_one) {
+		spdk_nvme_qpair_process_completions(u2_qpair, 0);
+	}
+}
+
+JNIEXPORT void JNICALL nvmeRead(JNIEnv *env, jobject thisObj, jobject buffer, jlong offset, jlong size)
+{
+	uint8_t *buf;
+	uint64_t offset_in_blocks;
+	uint32_t size_in_blocks;
+
+	if (u2_ns_size < size) {
+		fprintf(stderr, "invalid I/O size %"PRId64"!\n", (int64_t)size);
+		exit(1);
+	}
+
+	buf = (uint8_t *)(*env)->GetDirectBufferAddress(env, buffer);
+	offset_in_blocks = offset / u2_ns_sector;    // byte-address -> block-address: here is naive stupid wrong!!!
+	size_in_blocks = size / u2_ns_sector;
+
+	if (spdk_nvme_ns_cmd_read(u2_ns, u2_qpair, buf, offset_in_blocks, size_in_blocks, u2_io_one_complete, NULL, 0)) {
+		fprintf(stderr, "failed to submit request!\n");
+		exit(1);
+	}
+	io_one = 1;
+
+	while (io_one) {
+		spdk_nvme_qpair_process_completions(u2_qpair, 0);
+	}
 }
 
