@@ -1,8 +1,8 @@
-# jni-nvm
+# JNI NVMe Access #
 
-user-level NVM access for Java: take full advantage of the potential performance of new NVM technologies.
+user-level NVMe SSD access for Java: take full advantage of the potential performance of new NVM technologies.
 
-## HowTo Build
+## HowTo Build ##
 
 * follow `doc/spdk-gsg.md` to prepare SPDK/DPDK build environment.
 
